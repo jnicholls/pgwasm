@@ -1,5 +1,24 @@
 use pgrx::prelude::*;
 
+mod config;
+mod mapping;
+mod registry;
+mod runtime;
+mod trampoline;
+
+pub use config::{HostPolicy, LoadOptions};
+pub use mapping::{ExportSignature, PgWasmArgDesc, PgWasmReturnDesc, PgWasmTypeKind};
+pub use registry::{ModuleId, RegisteredFunction, lookup_by_fn_oid, register_fn_oid};
+pub use runtime::{RuntimeKind, StubWasmBackend, WasmRuntimeBackend};
+pub use trampoline::TRAMPOLINE_PG_SRC;
+
+#[cfg(feature = "runtime_wasmtime")]
+pub use runtime::wasmtime_backend::WasmtimeBackend;
+#[cfg(feature = "runtime_wasmer")]
+pub use runtime::wasmer_backend::WasmerBackend;
+#[cfg(feature = "runtime_extism")]
+pub use runtime::extism_backend::ExtismBackend;
+
 ::pgrx::pg_module_magic!(name, version);
 
 #[pg_extern]
@@ -17,19 +36,20 @@ mod tests {
         assert_eq!("Hello, pg_wasm", crate::hello_pg_wasm());
     }
 
+    #[cfg(feature = "runtime_wasmtime")]
+    #[pg_test]
+    fn test_wasmtime_backend_instantiates() {
+        let _ = crate::WasmtimeBackend::new();
+    }
 }
 
-/// This module is required by `cargo pgrx test` invocations.
-/// It must be visible at the root of your extension crate.
+/// Required by `cargo pgrx test`.
 #[cfg(test)]
 pub mod pg_test {
-    pub fn setup(_options: Vec<&str>) {
-        // perform one-off initialization when the pg_test framework starts
-    }
+    pub fn setup(_options: Vec<&str>) {}
 
     #[must_use]
     pub fn postgresql_conf_options() -> Vec<&'static str> {
-        // return any postgresql.conf settings that are required for your tests
         vec![]
     }
 }

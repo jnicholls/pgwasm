@@ -12,17 +12,26 @@ name = "pgrx_embed_pg_wasm"
 path = "./src/bin/pgrx_embed.rs"
 
 [features]
-default = ["pg13"]
-pg13 = ["pgrx/pg13", "pgrx-tests/pg13" ]
-pg14 = ["pgrx/pg14", "pgrx-tests/pg14" ]
-pg15 = ["pgrx/pg15", "pgrx-tests/pg15" ]
-pg16 = ["pgrx/pg16", "pgrx-tests/pg16" ]
-pg17 = ["pgrx/pg17", "pgrx-tests/pg17" ]
-pg18 = ["pgrx/pg18", "pgrx-tests/pg18" ]
+default = ["pg13", "runtime_wasmtime"]
+pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
+pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
+pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
+pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
+pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
+pg18 = ["pgrx/pg18", "pgrx-tests/pg18"]
 pg_test = []
+runtime_wasmer = ["dep:wasmer", "dep:wasmparser"]
+runtime_wasmtime = ["dep:wasmtime", "dep:wasmparser"]
+runtime_extism = ["dep:extism", "dep:wasmparser"]
 
 [dependencies]
+anyhow.workspace = true
 pgrx.workspace = true
+thiserror.workspace = true
+wasmparser = { workspace = true, optional = true }
+wasmtime = { workspace = true, optional = true }
+wasmer = { workspace = true, optional = true }
+extism = { workspace = true, optional = true }
 
 [dev-dependencies]
 pgrx-tests.workspace = true

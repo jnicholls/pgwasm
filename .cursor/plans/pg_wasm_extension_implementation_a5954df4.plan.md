@@ -4,7 +4,7 @@ overview: "Implement a pgrx-based PostgreSQL extension that loads WASM modules (
 todos:
   - id: core-layout
     content: Split pg_wasm/src/lib.rs into modules (runtime trait + one backend stub, registry, mapping, trampoline, config); add Cargo features/deps per plan section 1.
-    status: pending
+    status: completed
   - id: registry-trampoline
     content: In-memory registry fn_oid to module handle and export name; single trampoline returning a constant; register trampoline with pgrx; verify in tests.
     status: pending
