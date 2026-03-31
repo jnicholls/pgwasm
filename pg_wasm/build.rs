@@ -1,10 +1,13 @@
-//! Compiles `fixtures/test_add.wat` to WebAssembly for tests and dev workflows.
+//! Compiles fixture `.wat` files to WebAssembly for tests and dev workflows.
 
 fn main() {
-    println!("cargo:rerun-if-changed=fixtures/test_add.wat");
-    let wat = std::fs::read_to_string("fixtures/test_add.wat").expect("read wat");
-    let wasm = wat::parse_str(&wat).expect("parse wat");
-    let out = std::path::Path::new(&std::env::var_os("OUT_DIR").expect("OUT_DIR"))
-        .join("test_add.wasm");
-    std::fs::write(&out, wasm).expect("write wasm");
+    let out = std::env::var_os("OUT_DIR").expect("OUT_DIR");
+    let out_dir = std::path::Path::new(&out);
+    for name in ["test_add", "test_echo_mem"] {
+        let path = format!("fixtures/{name}.wat");
+        println!("cargo:rerun-if-changed={path}");
+        let wat = std::fs::read_to_string(&path).expect("read wat");
+        let wasm = wat::parse_str(&wat).expect("parse wat");
+        std::fs::write(out_dir.join(format!("{name}.wasm")), wasm).expect("write wasm");
+    }
 }

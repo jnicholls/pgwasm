@@ -18,6 +18,14 @@ pub struct LoadOptions {
 }
 
 impl LoadOptions {
+    /// Export name → SQL types from `options.exports` (see [`crate::mapping::parse_export_hints`]).
+    pub fn export_hints(&self) -> Result<crate::mapping::ExportHintMap, String> {
+        let Some(JsonB(v)) = &self.raw else {
+            return Ok(crate::mapping::ExportHintMap::new());
+        };
+        crate::mapping::parse_export_hints(v)
+    }
+
     #[must_use]
     pub fn from_jsonb(j: Option<JsonB>) -> Self {
         let Some(JsonB(val)) = j else {

@@ -79,7 +79,8 @@ pub fn load_from_bytes(
     let id = registry::alloc_module_id();
     let prefix = module_sql_prefix(module_name, id)?;
 
-    let exports = match wasmtime_backend::compile_store_and_list_exports(id, wasm) {
+    let export_hints = opts.export_hints().map_err(LoadError::Message)?;
+    let exports = match wasmtime_backend::compile_store_and_list_exports(id, wasm, &export_hints) {
         Ok(e) => e,
         Err(e) => return Err(LoadError::Message(e)),
     };
@@ -87,7 +88,7 @@ pub fn load_from_bytes(
     if exports.is_empty() {
         wasmtime_backend::remove_compiled_module(id);
         return Err(LoadError::Message(
-            "no supported wasm function exports (supported: ()->i32 and (i32,i32)->i32)".into(),
+            "no supported wasm function exports (int/float scalars, or use options \"exports\" for text/bytea/jsonb)".into(),
         ));
     }
 

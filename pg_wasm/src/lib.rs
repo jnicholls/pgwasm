@@ -18,7 +18,9 @@ mod trampoline;
 mod load;
 
 pub use config::{HostPolicy, LoadOptions};
-pub use mapping::{ExportSignature, PgWasmArgDesc, PgWasmReturnDesc, PgWasmTypeKind};
+pub use mapping::{
+    ExportHintMap, ExportSignature, ExportTypeHint, PgWasmArgDesc, PgWasmReturnDesc, PgWasmTypeKind,
+};
 pub use registry::{
     ModuleId, RegisteredFunction, lookup_by_fn_oid, register_fn_oid, unregister_fn_oid,
 };
@@ -85,7 +87,7 @@ fn pg_wasm_unload(module_id: i64) {
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_schema]
 mod tests {
-    use pgrx::{prelude::*, spi::Spi};
+    use pgrx::{prelude::*, spi::Spi, JsonB};
 
     use crate::{
         mapping::ExportSignature,
@@ -110,9 +112,18 @@ mod tests {
 
     #[cfg(feature = "runtime_wasmtime")]
     fn wasm_fixture_hex_lower() -> String {
-        const W: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/test_add.wasm"));
-        let mut s = String::with_capacity(W.len() * 2);
-        for b in W {
+        wasm_bytes_hex_lower(include_bytes!(concat!(env!("OUT_DIR"), "/test_add.wasm")))
+    }
+
+    #[cfg(feature = "runtime_wasmtime")]
+    fn wasm_echo_mem_hex_lower() -> String {
+        wasm_bytes_hex_lower(include_bytes!(concat!(env!("OUT_DIR"), "/test_echo_mem.wasm")))
+    }
+
+    #[cfg(feature = "runtime_wasmtime")]
+    fn wasm_bytes_hex_lower(wasm: &[u8]) -> String {
+        let mut s = String::with_capacity(wasm.len() * 2);
+        for b in wasm {
             use std::fmt::Write;
             write!(&mut s, "{b:02x}").unwrap();
         }
@@ -137,6 +148,68 @@ mod tests {
             .expect("42 non-null");
         assert_eq!(ft, 42);
         Spi::run(&format!("SELECT {ext_nsp}.pg_wasm_unload({mid})")).expect("unload");
+    }
+
+    #[cfg(feature = "runtime_wasmtime")]
+    #[pg_test]
+    fn test_pg_wasm_load_bytea_echo_mem_exports() {
+        let ext_nsp = extension_schema_name();
+        let hex = wasm_echo_mem_hex_lower();
+        let opts = serde_json::json!({
+            "exports": {
+                "echo_mem": {
+                    "args": ["bytea"],
+                    "returns": "bytea"
+                }
+            }
+        })
+        .to_string();
+        let load_sql = format!(
+            "SELECT {ext_nsp}.pg_wasm_load(decode('{hex}','hex')::bytea, 'echo_pg'::text, '{}'::jsonb)",
+            opts.replace('\'', "''"),
+        );
+        let mid = Spi::get_one::<i64>(&load_sql)
+            .expect("load echo wasm")
+            .expect("module id");
+        let out = Spi::get_one::<Vec<u8>>(&format!(
+            "SELECT {ext_nsp}.echo_pg_echo_mem('\\xdeadbeef'::bytea)"
+        ))
+        .expect("echo spi")
+        .expect("echo non-null");
+        assert_eq!(out, &[0xde, 0xad, 0xbe, 0xef]);
+
+        Spi::run(&format!("SELECT {ext_nsp}.pg_wasm_unload({mid})")).expect("unload echo");
+    }
+
+    #[cfg(feature = "runtime_wasmtime")]
+    #[pg_test]
+    fn test_pg_wasm_load_jsonb_echo_mem_exports() {
+        let ext_nsp = extension_schema_name();
+        let hex = wasm_echo_mem_hex_lower();
+        let opts = serde_json::json!({
+            "exports": {
+                "echo_mem": {
+                    "args": ["jsonb"],
+                    "returns": "jsonb"
+                }
+            }
+        })
+        .to_string();
+        let load_sql = format!(
+            "SELECT {ext_nsp}.pg_wasm_load(decode('{hex}','hex')::bytea, 'ejson'::text, '{}'::jsonb)",
+            opts.replace('\'', "''"),
+        );
+        let mid = Spi::get_one::<i64>(&load_sql)
+            .expect("load echo json")
+            .expect("module id");
+        let j_out = Spi::get_one::<JsonB>(&format!(
+            "SELECT {ext_nsp}.ejson_echo_mem('{{\"k\":42}}'::jsonb)"
+        ))
+        .expect("json echo")
+        .expect("json");
+        assert_eq!(j_out.0["k"], serde_json::json!(42));
+
+        Spi::run(&format!("SELECT {ext_nsp}.pg_wasm_unload({mid})")).expect("unload ejson");
     }
 
     #[cfg(feature = "runtime_wasmtime")]
@@ -198,8 +271,12 @@ mod tests {
     fn test_trampoline_dispatch_via_sql_function() {
         let wasm = include_bytes!(concat!(env!("OUT_DIR"), "/test_add.wasm"));
         let mid = registry::alloc_module_id();
-        crate::runtime::wasmtime_backend::compile_store_and_list_exports(mid, wasm)
-            .expect("smoke compile");
+        crate::runtime::wasmtime_backend::compile_store_and_list_exports(
+            mid,
+            wasm,
+            &crate::mapping::ExportHintMap::new(),
+        )
+        .expect("smoke compile");
 
         let create_sql = concat!(
             "CREATE OR REPLACE FUNCTION public.pg_wasm_trampoline_smoke() ",

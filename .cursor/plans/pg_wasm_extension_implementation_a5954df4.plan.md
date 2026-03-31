@@ -19,7 +19,7 @@ todos:
     status: completed
   - id: type-mapping-extended
     content: Extend mapping to text, JSONB, simple UDT to bytes or JSON; optional WIT-driven layout for components.
-    status: pending
+    status: completed
   - id: wasi-policies-reconfigure
     content: Extension and per-module policy GUCs; WASI only when allowed; pg_wasm.reconfigure_module.
     status: pending

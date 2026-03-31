@@ -30,6 +30,7 @@ runtime_extism = ["dep:extism", "dep:wasmparser"]
 [dependencies]
 anyhow.workspace = true
 pgrx.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 wasmparser = { workspace = true, optional = true }
 wasmtime = { workspace = true, optional = true }
