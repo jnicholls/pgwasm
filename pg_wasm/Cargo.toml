@@ -7,6 +7,9 @@ edition.workspace = true
 [lib]
 crate-type = ["cdylib", "lib"]
 
+[build-dependencies]
+wat = "1"
+
 [[bin]]
 name = "pgrx_embed_pg_wasm"
 path = "./src/bin/pgrx_embed.rs"

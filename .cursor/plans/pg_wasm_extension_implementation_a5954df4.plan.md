@@ -10,10 +10,10 @@ todos:
     status: completed
   - id: dynamic-udf-registration
     content: Create and drop pg_proc per export via pgrx/pg_sys; unload removes procs; SELECT hits trampoline and resolves Oid correctly.
-    status: pending
+    status: completed
   - id: wasmtime-load-path-bytea
     content: Implement load_from_bytes, pg_wasm_load(text) with path GUCs and policy, pg_wasm_load(bytea); wasmtime compile/instantiate; scalar i32 mapping; fixture .wasm under module_path in tests.
-    status: pending
+    status: completed
   - id: abi-detection
     content: ABI detection order Extism then WIT component then core; branch loading path and store ABI in module metadata.
     status: pending
