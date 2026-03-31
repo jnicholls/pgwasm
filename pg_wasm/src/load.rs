@@ -6,8 +6,11 @@ use pgrx::{prelude::*, spi::Spi, JsonB};
 
 use crate::{
     abi::{self, WasmAbiKind},
-    config::LoadOptions,
-    guc::{allow_load_from_file, allowed_path_prefixes_raw, max_module_bytes, module_path_cstr},
+    config::{LoadOptions, merge_policy_overrides},
+    guc::{
+        allow_load_from_file, allowed_path_prefixes_raw, effective_host_policy, max_module_bytes,
+        module_path_cstr,
+    },
     proc_reg::{self, RegisterError},
     registry::{self, ModuleId, RegisteredFunction},
     runtime::wasmtime_backend,
@@ -32,6 +35,7 @@ fn cleanup_failed_load(id: ModuleId, oids: &[pgrx::pg_sys::Oid]) {
         proc_reg::drop_wasm_trampoline_proc(*o);
     }
     let _ = registry::take_module_proc_oids(id);
+    registry::take_module_wasi_and_policy(id);
     wasmtime_backend::remove_compiled_module(id);
 }
 
@@ -49,6 +53,15 @@ pub fn load_from_bytes(
     enforce_size_limit(wasm.len())?;
     validate_wasm_prefix(wasm)?;
     let opts = LoadOptions::from_jsonb(options);
+    let needs_wasi = abi::wasm_imports_wasi_host(wasm)
+        .map_err(|e| LoadError::Message(e.to_string()))?;
+    let effective = effective_host_policy(&opts.policy);
+    if needs_wasi && !effective.allow_wasi {
+        return Err(LoadError::Message(
+            "wasm imports WASI preview1 but effective policy denies WASI (enable pg_wasm.allow_wasi and ensure per-module allow_wasi is not false)"
+                .into(),
+        ));
+    }
     let abi = match opts.abi_override.as_deref() {
         Some(s) => abi::parse_abi_override(s).ok_or_else(|| {
             LoadError::Message(format!(
@@ -128,7 +141,41 @@ pub fn load_from_bytes(
     }
 
     registry::record_module_abi(id, abi);
+    registry::record_module_wasi_and_policy(id, needs_wasi, opts.policy);
     Ok(id)
+}
+
+pub fn reconfigure_module(module_id: i64, options: Option<JsonB>) -> Result<(), LoadError> {
+    if !unsafe { pg_sys::superuser() } {
+        return Err(LoadError::Message(
+            "pg_wasm_reconfigure_module requires a superuser session".into(),
+        ));
+    }
+    let mid = ModuleId(module_id);
+    let needs_wasi = registry::module_needs_wasi(mid).ok_or_else(|| {
+        LoadError::Message(format!("pg_wasm_reconfigure_module: unknown module_id {module_id}"))
+    })?;
+    let old = registry::module_policy_overrides(mid).ok_or_else(|| {
+        LoadError::Message(format!("pg_wasm_reconfigure_module: unknown module_id {module_id}"))
+    })?;
+    let delta = match options {
+        Some(JsonB(v)) => v,
+        None => serde_json::Value::Object(serde_json::Map::new()),
+    };
+    let merged = merge_policy_overrides(old, &delta);
+    let effective = effective_host_policy(&merged);
+    if needs_wasi && !effective.allow_wasi {
+        return Err(LoadError::Message(
+            "pg_wasm_reconfigure_module: effective policy would deny WASI for a module that imports it"
+                .into(),
+        ));
+    }
+    registry::replace_module_policy_overrides(mid, merged).map_err(|()| {
+        LoadError::Message(format!(
+            "pg_wasm_reconfigure_module: unknown module_id {module_id}"
+        ))
+    })?;
+    Ok(())
 }
 
 fn module_sql_prefix(module_name: Option<&str>, id: ModuleId) -> Result<String, LoadError> {
@@ -296,6 +343,7 @@ pub fn unload_module(id: i64) -> Result<(), LoadError> {
         proc_reg::drop_wasm_trampoline_proc(oid);
     }
     let _ = registry::take_module_abi(mid);
+    registry::take_module_wasi_and_policy(mid);
     wasmtime_backend::remove_compiled_module(mid);
     Ok(())
 }

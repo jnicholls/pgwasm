@@ -17,7 +17,7 @@ mod trampoline;
 #[cfg(feature = "runtime_wasmtime")]
 mod load;
 
-pub use config::{HostPolicy, LoadOptions};
+pub use config::{HostPolicy, LoadOptions, PolicyOverrides};
 pub use mapping::{
     ExportHintMap, ExportSignature, ExportTypeHint, PgWasmArgDesc, PgWasmReturnDesc, PgWasmTypeKind,
 };
@@ -80,6 +80,14 @@ fn pg_wasm_load_path(path: &str, module_name: Option<&str>, options: Option<Json
 #[pg_extern]
 fn pg_wasm_unload(module_id: i64) {
     if let Err(e) = crate::load::unload_module(module_id) {
+        error!("{e}");
+    }
+}
+
+#[cfg(feature = "runtime_wasmtime")]
+#[pg_extern]
+fn pg_wasm_reconfigure_module(module_id: i64, options: Option<JsonB>) {
+    if let Err(e) = crate::load::reconfigure_module(module_id, options) {
         error!("{e}");
     }
 }
@@ -319,6 +327,79 @@ mod tests {
         crate::runtime::wasmtime_backend::with_backend(|b| {
             assert_eq!(b.kind(), RuntimeKind::Wasmtime);
         });
+    }
+
+    #[cfg(feature = "runtime_wasmtime")]
+    #[pg_test]
+    fn test_wasm_load_wasi_rejected_without_allow_wasi_guc() {
+        let ext_nsp = extension_schema_name();
+        let hex = wasm_bytes_hex_lower(include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/test_wasi_fd_write.wasm"
+        )));
+        Spi::run("SET pg_wasm.allow_wasi = off").expect("guc");
+        let load_sql = format!(
+            "SELECT {ext_nsp}.pg_wasm_load(decode('{hex}','hex')::bytea, 'wasi_x'::text, NULL::jsonb)",
+        );
+        let err = Spi::get_one::<i64>(&load_sql).expect_err("load should fail");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("WASI") || msg.contains("wasi"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[cfg(feature = "runtime_wasmtime")]
+    #[pg_test]
+    fn test_wasm_load_wasi_succeeds_when_allowed() {
+        let ext_nsp = extension_schema_name();
+        let hex = wasm_bytes_hex_lower(include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/test_wasi_fd_write.wasm"
+        )));
+        Spi::run("SET pg_wasm.allow_wasi = on").expect("guc on");
+        let load_sql = format!(
+            "SELECT {ext_nsp}.pg_wasm_load(decode('{hex}','hex')::bytea, 'wasi_ok'::text, NULL::jsonb)",
+        );
+        let mid = Spi::get_one::<i64>(&load_sql)
+            .expect("load wasi wasm")
+            .expect("module id");
+        let v = Spi::get_one::<i32>(&format!("SELECT {ext_nsp}.wasi_ok_forty_two()"))
+            .expect("call")
+            .expect("non-null");
+        assert_eq!(v, 42);
+        Spi::run(&format!(
+            "SELECT {ext_nsp}.pg_wasm_reconfigure_module({mid}, '{{\"allow_wasi\": true}}'::jsonb)"
+        ))
+        .expect("reconfigure no-op narrow");
+        Spi::run(&format!("SELECT {ext_nsp}.pg_wasm_unload({mid})")).expect("unload wasi");
+    }
+
+    #[cfg(feature = "runtime_wasmtime")]
+    #[pg_test]
+    fn test_reconfigure_rejects_revoking_wasi_for_wasi_module() {
+        let ext_nsp = extension_schema_name();
+        let hex = wasm_bytes_hex_lower(include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/test_wasi_fd_write.wasm"
+        )));
+        Spi::run("SET pg_wasm.allow_wasi = on").expect("guc on");
+        let load_sql = format!(
+            "SELECT {ext_nsp}.pg_wasm_load(decode('{hex}','hex')::bytea, 'wasi_rc'::text, NULL::jsonb)",
+        );
+        let mid = Spi::get_one::<i64>(&load_sql)
+            .expect("load")
+            .expect("mid");
+        let rc_sql = format!(
+            "SELECT {ext_nsp}.pg_wasm_reconfigure_module({mid}, '{{\"allow_wasi\": false}}'::jsonb)",
+        );
+        let err = Spi::run(&rc_sql).expect_err("reconfigure should fail");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("WASI") || msg.contains("policy"),
+            "unexpected error: {msg}"
+        );
+        Spi::run(&format!("SELECT {ext_nsp}.pg_wasm_unload({mid})")).expect("unload");
     }
 }
 

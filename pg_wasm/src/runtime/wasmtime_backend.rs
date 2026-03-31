@@ -13,15 +13,18 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
-use wasmtime::{Engine, ExternType, Instance, Memory, Module, Store, ValType};
+use wasmtime::{Engine, ExternType, Instance, Linker, Memory, Module, Store, ValType};
+use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder, p1::WasiP1Ctx};
 
 use super::{RuntimeKind, WasmRuntimeBackend};
 use crate::{
+    config::HostPolicy,
+    guc,
     mapping::{
         ExportHintMap, ExportSignature, ExportTypeHint, PgWasmArgDesc, PgWasmReturnDesc,
         PgWasmTypeKind, signature_from_hint,
     },
-    registry::ModuleId,
+    registry::{self, ModuleId},
 };
 
 static INSTANCE: OnceLock<Mutex<WasmtimeBackend>> = OnceLock::new();
@@ -31,6 +34,112 @@ pub const MEM_IO_INPUT_BASE: u32 = 1024;
 
 /// Upper bound on returned byte length from a single buffer-style wasm call (16 MiB).
 const MEM_IO_MAX_OUT: u32 = 16 * 1024 * 1024;
+
+/// Per-[`Store`] state when a module is linked with WASI preview1.
+pub struct PgWasmStoreState {
+    pub wasi: WasiP1Ctx,
+}
+
+enum InstanceBundle {
+    Plain {
+        instance: Instance,
+        store: Store<()>,
+    },
+    Wasi {
+        instance: Instance,
+        store: Store<PgWasmStoreState>,
+    },
+}
+
+fn build_wasi_p1_ctx(policy: &HostPolicy) -> Result<WasiP1Ctx, String> {
+    let mut builder = WasiCtxBuilder::new();
+    builder.allow_blocking_current_thread(true);
+    if policy.allow_env {
+        builder.inherit_env();
+    }
+    if policy.allow_network {
+        builder.inherit_network();
+    } else {
+        builder.allow_tcp(false);
+        builder.allow_udp(false);
+        builder.allow_ip_name_lookup(false);
+    }
+    if policy.allow_fs_read || policy.allow_fs_write {
+        if let Some(cs) = guc::module_path_cstr() {
+            let base = cs
+                .to_str()
+                .map_err(|_| "pg_wasm.module_path must be valid UTF-8 for WASI preopen".to_string())?;
+            let mut dir_perms = DirPerms::empty();
+            if policy.allow_fs_read {
+                dir_perms |= DirPerms::READ;
+            }
+            if policy.allow_fs_write {
+                dir_perms |= DirPerms::MUTATE;
+            }
+            let mut file_perms = FilePerms::empty();
+            if policy.allow_fs_read {
+                file_perms |= FilePerms::READ;
+            }
+            if policy.allow_fs_write {
+                file_perms |= FilePerms::WRITE;
+            }
+            builder
+                .preopened_dir(base, "/", dir_perms, file_perms)
+                .map_err(|e| format!("pg_wasm: WASI preopen (pg_wasm.module_path): {e}"))?;
+        }
+    }
+    Ok(builder.build_p1())
+}
+
+fn instantiate_bundle(module: ModuleId) -> Result<InstanceBundle, String> {
+    let needs_wasi = registry::module_needs_wasi(module).ok_or_else(|| {
+        format!(
+            "pg_wasm: no metadata for wasm module id {} (not loaded in this backend)",
+            module.0
+        )
+    })?;
+    let overrides = registry::module_policy_overrides(module).ok_or_else(|| {
+        format!("pg_wasm: no policy metadata for wasm module id {}", module.0)
+    })?;
+    let policy = guc::effective_host_policy(&overrides);
+    if needs_wasi && !policy.allow_wasi {
+        return Err(
+            "pg_wasm: module imports WASI preview1 but effective host policy denies WASI (see pg_wasm.allow_wasi and per-module allow_wasi)"
+                .into(),
+        );
+    }
+
+    let (engine, arc) = {
+        let g = mutex().lock().map_err(|e| e.to_string())?;
+        let arc = g
+            .modules
+            .get(&module)
+            .cloned()
+            .ok_or_else(|| format!("pg_wasm: no wasm module for id {}", module.0))?;
+        (g.engine.clone(), arc)
+    };
+
+    if !needs_wasi {
+        let mut store = Store::new(&engine, ());
+        let instance = Instance::new(&mut store, &arc, &[]).map_err(|e| e.to_string())?;
+        return Ok(InstanceBundle::Plain { store, instance });
+    }
+
+    let wasi = build_wasi_p1_ctx(&policy)?;
+    let mut store = Store::new(
+        &engine,
+        PgWasmStoreState { wasi },
+    );
+    let mut linker = Linker::new(&engine);
+    wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |s: &mut PgWasmStoreState| {
+        &mut s.wasi
+    })
+    .map_err(|e| e.to_string())?;
+    let instance = linker
+        .instantiate(&mut store, &arc)
+        .map_err(|e| e.to_string())?;
+    Ok(InstanceBundle::Wasi { store, instance })
+}
 
 fn mutex() -> &'static Mutex<WasmtimeBackend> {
     INSTANCE.get_or_init(|| Mutex::new(WasmtimeBackend::empty()))
@@ -131,35 +240,43 @@ pub fn call_mem_in_out(
     export: &str,
     input: &[u8],
 ) -> Result<Vec<u8>, String> {
-    let (engine, arc) = {
-        let g = mutex().lock().map_err(|e| e.to_string())?;
-        let arc = g
-            .modules
-            .get(&module)
-            .cloned()
-            .ok_or_else(|| format!("pg_wasm: no wasm module for id {}", module.0))?;
-        Ok::<_, String>((g.engine.clone(), arc))
-    }?;
-    let mut store = Store::new(&engine, ());
-    let instance = Instance::new(&mut store, &arc, &[]).map_err(|e| e.to_string())?;
+    let bundle = instantiate_bundle(module)?;
+    match bundle {
+        InstanceBundle::Plain {
+            mut store,
+            instance,
+        } => call_mem_in_out_impl(&mut store, &instance, export, input),
+        InstanceBundle::Wasi {
+            mut store,
+            instance,
+        } => call_mem_in_out_impl(&mut store, &instance, export, input),
+    }
+}
+
+fn call_mem_in_out_impl<S>(
+    store: &mut Store<S>,
+    instance: &Instance,
+    export: &str,
+    input: &[u8],
+) -> Result<Vec<u8>, String> {
     let memory = instance
-        .get_memory(&mut store, "memory")
+        .get_memory(&mut *store, "memory")
         .ok_or_else(|| "pg_wasm: wasm module has no exported `memory`".to_string())?;
     let f = instance
-        .get_typed_func::<(i32, i32), i32>(&mut store, export)
+        .get_typed_func::<(i32, i32), i32>(&mut *store, export)
         .map_err(|e| e.to_string())?;
 
     let base = MEM_IO_INPUT_BASE as usize;
     let out_base = base + ((input.len() + 7) & !7);
     let need = out_base.saturating_add(MEM_IO_MAX_OUT as usize);
-    grow_memory_to(&mut store, &memory, need)?;
+    grow_memory_to(store, &memory, need)?;
 
     memory
-        .write(&mut store, base, input)
+        .write(&mut *store, base, input)
         .map_err(|e| e.to_string())?;
 
     let out_len = f
-        .call(&mut store, (MEM_IO_INPUT_BASE as i32, input.len() as i32))
+        .call(&mut *store, (MEM_IO_INPUT_BASE as i32, input.len() as i32))
         .map_err(|e| e.to_string())?;
     if out_len < 0 {
         return Err(format!("pg_wasm: wasm returned negative output length {out_len}"));
@@ -171,16 +288,16 @@ pub fn call_mem_in_out(
         ));
     }
     let end = out_base + out_len as usize;
-    grow_memory_to(&mut store, &memory, end)?;
+    grow_memory_to(store, &memory, end)?;
 
     let mut out = vec![0u8; out_len as usize];
     memory
-        .read(&mut store, out_base, &mut out)
+        .read(&mut *store, out_base, &mut out)
         .map_err(|e| e.to_string())?;
     Ok(out)
 }
 
-fn grow_memory_to(store: &mut Store<()>, memory: &Memory, need: usize) -> Result<(), String> {
+fn grow_memory_to<S>(store: &mut Store<S>, memory: &Memory, need: usize) -> Result<(), String> {
     let page = 65536usize;
     let mut current = memory.data_size(&mut *store);
     while current < need {
@@ -194,21 +311,27 @@ fn grow_memory_to(store: &mut Store<()>, memory: &Memory, need: usize) -> Result
 
 macro_rules! scalar_call {
     ($module:expr, $export:expr, $($T:ty),* => $R:ty, $args:expr) => {{
-        let (engine, arc) = {
-            let g = mutex().lock().map_err(|e| e.to_string())?;
-            let arc = g
-                .modules
-                .get(&$module)
-                .cloned()
-                .ok_or_else(|| format!("pg_wasm: no wasm module for id {}", $module.0))?;
-            Ok::<_, String>((g.engine.clone(), arc))
-        }?;
-        let mut store = Store::new(&engine, ());
-        let instance = Instance::new(&mut store, &arc, &[]).map_err(|e| e.to_string())?;
-        let f = instance
-            .get_typed_func::<($($T,)*), $R>(&mut store, $export)
-            .map_err(|e| e.to_string())?;
-        f.call(&mut store, $args).map_err(|e| e.to_string())
+        let bundle = instantiate_bundle($module)?;
+        match bundle {
+            InstanceBundle::Plain {
+                mut store,
+                instance,
+            } => {
+                let f = instance
+                    .get_typed_func::<($($T,)*), $R>(&mut store, $export)
+                    .map_err(|e| e.to_string())?;
+                f.call(&mut store, $args).map_err(|e| e.to_string())
+            }
+            InstanceBundle::Wasi {
+                mut store,
+                instance,
+            } => {
+                let f = instance
+                    .get_typed_func::<($($T,)*), $R>(&mut store, $export)
+                    .map_err(|e| e.to_string())?;
+                f.call(&mut store, $args).map_err(|e| e.to_string())
+            }
+        }
     }};
 }
 
@@ -256,6 +379,7 @@ pub fn call_f64_arity2(module: ModuleId, export: &str, a: f64, b: f64) -> Result
     scalar_call!(module, export, f64, f64 => f64, (a, b))
 }
 
+#[cfg(any(test, feature = "pg_test"))]
 pub fn with_backend<R>(f: impl FnOnce(&WasmtimeBackend) -> R) -> R {
     let g = mutex().lock().expect("pg_wasm: wasmtime backend mutex poisoned");
     f(&g)

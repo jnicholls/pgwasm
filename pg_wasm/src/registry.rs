@@ -16,6 +16,9 @@ use crate::mapping::ExportSignature;
 use crate::abi::WasmAbiKind;
 
 #[cfg(feature = "runtime_wasmtime")]
+use crate::config::PolicyOverrides;
+
+#[cfg(feature = "runtime_wasmtime")]
 static NEXT_MODULE_ID: AtomicI64 = AtomicI64::new(1);
 
 /// Stable handle for a loaded module (bigint / sequence in SQL).
@@ -39,6 +42,13 @@ static MODULE_PROCS: OnceLock<Mutex<HashMap<ModuleId, Vec<Oid>>>> = OnceLock::ne
 #[cfg(feature = "runtime_wasmtime")]
 static MODULE_ABI: OnceLock<Mutex<HashMap<ModuleId, WasmAbiKind>>> = OnceLock::new();
 
+#[cfg(feature = "runtime_wasmtime")]
+static MODULE_NEEDS_WASI: OnceLock<Mutex<HashMap<ModuleId, bool>>> = OnceLock::new();
+
+#[cfg(feature = "runtime_wasmtime")]
+static MODULE_POLICY_OVERRIDES: OnceLock<Mutex<HashMap<ModuleId, PolicyOverrides>>> =
+    OnceLock::new();
+
 fn fn_oid_map() -> &'static Mutex<HashMap<Oid, RegisteredFunction>> {
     FN_OID_MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -53,11 +63,53 @@ fn module_abi_map() -> &'static Mutex<HashMap<ModuleId, WasmAbiKind>> {
     MODULE_ABI.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+#[cfg(feature = "runtime_wasmtime")]
+fn module_needs_wasi_map() -> &'static Mutex<HashMap<ModuleId, bool>> {
+    MODULE_NEEDS_WASI.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(feature = "runtime_wasmtime")]
+fn module_policy_overrides_map() -> &'static Mutex<HashMap<ModuleId, PolicyOverrides>> {
+    MODULE_POLICY_OVERRIDES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Record detected or overridden ABI after a successful load (plan §2).
 #[cfg(feature = "runtime_wasmtime")]
 pub fn record_module_abi(module: ModuleId, abi: WasmAbiKind) {
     let mut g = module_abi_map().lock().expect("module abi map poisoned");
     g.insert(module, abi);
+}
+
+#[cfg(feature = "runtime_wasmtime")]
+pub fn record_module_wasi_and_policy(module: ModuleId, needs_wasi: bool, policy: PolicyOverrides) {
+    let mut w = module_needs_wasi_map().lock().expect("module wasi map poisoned");
+    w.insert(module, needs_wasi);
+    let mut p = module_policy_overrides_map().lock().expect("module policy map poisoned");
+    p.insert(module, policy);
+}
+
+#[cfg(feature = "runtime_wasmtime")]
+pub fn replace_module_policy_overrides(module: ModuleId, policy: PolicyOverrides) -> Result<(), ()> {
+    let mut p = module_policy_overrides_map().lock().expect("module policy map poisoned");
+    if !p.contains_key(&module) {
+        return Err(());
+    }
+    p.insert(module, policy);
+    Ok(())
+}
+
+#[cfg(feature = "runtime_wasmtime")]
+#[must_use]
+pub fn module_needs_wasi(module: ModuleId) -> Option<bool> {
+    let g = module_needs_wasi_map().lock().expect("module wasi map poisoned");
+    g.get(&module).copied()
+}
+
+#[cfg(feature = "runtime_wasmtime")]
+#[must_use]
+pub fn module_policy_overrides(module: ModuleId) -> Option<PolicyOverrides> {
+    let g = module_policy_overrides_map().lock().expect("module policy map poisoned");
+    g.get(&module).copied()
 }
 
 /// Remove and return stored ABI for `module` (e.g. on unload).
@@ -66,6 +118,14 @@ pub fn record_module_abi(module: ModuleId, abi: WasmAbiKind) {
 pub fn take_module_abi(module: ModuleId) -> Option<WasmAbiKind> {
     let mut g = module_abi_map().lock().expect("module abi map poisoned");
     g.remove(&module)
+}
+
+#[cfg(feature = "runtime_wasmtime")]
+pub fn take_module_wasi_and_policy(module: ModuleId) {
+    let mut w = module_needs_wasi_map().lock().expect("module wasi map poisoned");
+    w.remove(&module);
+    let mut p = module_policy_overrides_map().lock().expect("module policy map poisoned");
+    p.remove(&module);
 }
 
 #[cfg(feature = "runtime_wasmtime")]

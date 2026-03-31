@@ -22,7 +22,7 @@ todos:
     status: completed
   - id: wasi-policies-reconfigure
     content: Extension and per-module policy GUCs; WASI only when allowed; pg_wasm.reconfigure_module.
-    status: pending
+    status: completed
   - id: metrics-views
     content: Counters/timings and optional resource stats; shared or process memory; expose pg_wasm_* views.
     status: pending

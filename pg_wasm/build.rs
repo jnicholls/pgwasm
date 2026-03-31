@@ -3,7 +3,7 @@
 fn main() {
     let out = std::env::var_os("OUT_DIR").expect("OUT_DIR");
     let out_dir = std::path::Path::new(&out);
-    for name in ["test_add", "test_echo_mem"] {
+    for name in ["test_add", "test_echo_mem", "test_wasi_fd_write"] {
         let path = format!("fixtures/{name}.wat");
         println!("cargo:rerun-if-changed={path}");
         let wat = std::fs::read_to_string(&path).expect("read wat");

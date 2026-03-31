@@ -10,6 +10,11 @@ use wasmparser::{Encoding, Parser, Payload};
 const EXTISM_ENV_MODULE: &str = "extism:host/env";
 const EXTISM_USER_MODULE: &str = "extism:host/user";
 
+/// WASI preview 1 module name for core wasm imports (`fd_write`, etc.).
+const WASI_SNAPSHOT_PREVIEW1: &str = "wasi_snapshot_preview1";
+/// Legacy unstable module name.
+const WASI_UNSTABLE: &str = "wasi_unstable";
+
 /// Classified ABI for a wasm or component binary.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WasmAbiKind {
@@ -65,6 +70,26 @@ pub fn detect_wasm_abi(wasm: &[u8]) -> Result<WasmAbiKind, AbiDetectError> {
     Ok(WasmAbiKind::CoreWasm)
 }
 
+/// Returns true if the module imports `wasi_snapshot_preview1` or `wasi_unstable` (WASI in core wasm).
+pub fn wasm_imports_wasi_host(wasm: &[u8]) -> Result<bool, AbiDetectError> {
+    let parser = Parser::new(0);
+    for payload in parser.parse_all(wasm) {
+        let payload = payload?;
+        if let Payload::ImportSection(reader) = payload {
+            for group in reader {
+                let imports = group?;
+                for imp in imports {
+                    let (_, imp) = imp?;
+                    if imp.module == WASI_SNAPSHOT_PREVIEW1 || imp.module == WASI_UNSTABLE {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// Parse `options` JSON key `abi` (`core`, `extism`, `component`).
 #[must_use]
 pub fn parse_abi_override(s: &str) -> Option<WasmAbiKind> {
@@ -97,6 +122,12 @@ mod tests {
         "#;
         let wasm = wat::parse_str(wat).expect("wat");
         assert_eq!(detect_wasm_abi(&wasm).unwrap(), WasmAbiKind::Extism);
+    }
+
+    #[test]
+    fn wasi_import_detected() {
+        let wasm = include_bytes!(concat!(env!("OUT_DIR"), "/test_wasi_fd_write.wasm"));
+        assert!(wasm_imports_wasi_host(wasm).unwrap());
     }
 
     #[test]
