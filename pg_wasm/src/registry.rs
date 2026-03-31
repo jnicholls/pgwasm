@@ -115,6 +115,42 @@ static MODULE_NEEDS_WASI: OnceLock<Mutex<HashMap<ModuleId, bool>>> = OnceLock::n
 static MODULE_POLICY_OVERRIDES: OnceLock<Mutex<HashMap<ModuleId, PolicyOverrides>>> =
     OnceLock::new();
 
+/// Persisted lifecycle hook export names (`on_unload`, `on_reconfigure`); `on_load` runs at load only.
+#[cfg(feature = "runtime_wasmtime")]
+#[derive(Clone, Debug, Default)]
+pub struct ModuleHooks {
+    pub on_unload: Option<String>,
+    pub on_reconfigure: Option<String>,
+}
+
+#[cfg(feature = "runtime_wasmtime")]
+static MODULE_HOOKS: OnceLock<Mutex<HashMap<ModuleId, ModuleHooks>>> = OnceLock::new();
+
+#[cfg(feature = "runtime_wasmtime")]
+fn module_hooks_map() -> &'static Mutex<HashMap<ModuleId, ModuleHooks>> {
+    MODULE_HOOKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(feature = "runtime_wasmtime")]
+pub fn record_module_hooks(module: ModuleId, hooks: ModuleHooks) {
+    let mut g = module_hooks_map().lock().expect("module hooks map poisoned");
+    g.insert(module, hooks);
+}
+
+#[cfg(feature = "runtime_wasmtime")]
+#[must_use]
+pub fn module_hooks(module: ModuleId) -> Option<ModuleHooks> {
+    let g = module_hooks_map().lock().expect("module hooks map poisoned");
+    g.get(&module).cloned()
+}
+
+#[cfg(feature = "runtime_wasmtime")]
+#[must_use]
+pub fn take_module_hooks(module: ModuleId) -> Option<ModuleHooks> {
+    let mut g = module_hooks_map().lock().expect("module hooks map poisoned");
+    g.remove(&module)
+}
+
 fn fn_oid_map() -> &'static Mutex<HashMap<Oid, RegisteredFunction>> {
     FN_OID_MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }

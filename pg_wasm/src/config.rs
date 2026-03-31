@@ -1,4 +1,4 @@
-//! Load options, host policy, and resource hints for WASM modules (wired up in later todos).
+//! Load options, host policy, lifecycle hook names, and resource hints for WASM modules.
 
 use pgrx::JsonB;
 
@@ -55,11 +55,21 @@ impl LoadOptions {
         crate::mapping::parse_export_hints(v)
     }
 
+    /// UTF-8 JSON of the full load `options` object for `(ptr, len)` lifecycle hooks; empty when unset.
+    #[must_use]
+    pub fn config_blob_for_hooks(&self) -> Vec<u8> {
+        let Some(JsonB(v)) = &self.raw else {
+            return Vec::new();
+        };
+        serde_json::to_vec(v).unwrap_or_default()
+    }
+
     #[must_use]
     pub fn from_jsonb(j: Option<JsonB>) -> Self {
         let Some(JsonB(val)) = j else {
             return Self::default();
         };
+        let (hook_on_load, hook_on_unload, hook_on_reconfigure) = hooks_from_json(&val);
         Self {
             runtime: val
                 .get("runtime")
@@ -69,11 +79,41 @@ impl LoadOptions {
                 .get("abi")
                 .and_then(|v| v.as_str())
                 .map(str::to_string),
+            hook_on_load,
+            hook_on_unload,
+            hook_on_reconfigure,
             policy: policy_overrides_from_json(&val),
             raw: Some(JsonB(val)),
-            ..Default::default()
         }
     }
+}
+
+/// Parse `hooks` object and/or top-level `on_load` / `hook_on_load`-style keys (plan §9).
+fn hooks_from_json(val: &serde_json::Value) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    let nested = val.get("hooks").and_then(|v| v.as_object());
+    let pick = |short: &str, long: &str| -> Option<String> {
+        let s = nested
+            .and_then(|m| m.get(short))
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| val.get(short).and_then(serde_json::Value::as_str))
+            .or_else(|| nested.and_then(|m| m.get(long)).and_then(serde_json::Value::as_str))
+            .or_else(|| val.get(long).and_then(serde_json::Value::as_str))?;
+        let t = s.trim();
+        if t.is_empty() {
+            None
+        } else {
+            Some(t.to_string())
+        }
+    };
+    (
+        pick("on_load", "hook_on_load"),
+        pick("on_unload", "hook_on_unload"),
+        pick("on_reconfigure", "hook_on_reconfigure"),
+    )
 }
 
 /// Effective host capabilities for WASI / imports (extension GUC ∩ per-module options).

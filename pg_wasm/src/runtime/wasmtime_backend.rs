@@ -9,7 +9,7 @@ use std::{
 };
 
 use wasmtime::{
-    Engine, ExternType, Instance, Linker, Memory, Module, Store, ValType,
+    Engine, ExternType, Instance, Linker, Memory, Module, Store, Val, ValType,
     component::{self, Component},
 };
 use wasmtime_wasi::{
@@ -380,6 +380,104 @@ pub fn remove_compiled_module(id: ModuleId) {
     if let Ok(mut g) = mutex().lock() {
         g.remove_stored(id);
     }
+}
+
+/// Invoke a lifecycle export if present: core wasm supports `() -> ()` or `(i32, i32) -> ()` with
+/// `config` written to linear memory at [`MEM_IO_INPUT_BASE`]; components support `() -> ()` only.
+/// Missing export is ignored (optional hook name).
+pub fn call_lifecycle_hook(module: ModuleId, export_name: &str, config: &[u8]) -> Result<(), String> {
+    let bundle = instantiate_bundle(module)?;
+    match bundle {
+        InstanceBundle::CorePlain { mut store, instance } => {
+            call_lifecycle_hook_core(&mut store, &instance, module, export_name, config)
+        }
+        InstanceBundle::CoreWasi { mut store, instance } => {
+            call_lifecycle_hook_core(&mut store, &instance, module, export_name, config)
+        }
+        InstanceBundle::ComponentPlain { mut store, instance } => {
+            call_lifecycle_hook_component(&mut store, &instance, export_name, config)
+        }
+        InstanceBundle::ComponentWasi { mut store, instance } => {
+            call_lifecycle_hook_component(&mut store, &instance, export_name, config)
+        }
+    }
+}
+
+fn call_lifecycle_hook_core<S>(
+    store: &mut Store<S>,
+    instance: &Instance,
+    module: ModuleId,
+    export_name: &str,
+    config: &[u8],
+) -> Result<(), String> {
+    let Some(func) = instance.get_func(&mut *store, export_name) else {
+        return Ok(());
+    };
+    let ty = func.ty(&mut *store);
+    let params: Vec<ValType> = ty.params().collect();
+    let results: Vec<ValType> = ty.results().collect();
+
+    match (params.as_slice(), results.as_slice()) {
+        ([], []) => {
+            func
+                .call(&mut *store, &[], &mut [])
+                .map_err(|e| e.to_string())?;
+        }
+        ([ValType::I32, ValType::I32], []) => {
+            let memory = instance
+                .get_memory(&mut *store, "memory")
+                .ok_or_else(|| {
+                    "pg_wasm: lifecycle hook (ptr,len) requires exported `memory`".to_string()
+                })?;
+            let ptr = MEM_IO_INPUT_BASE as i32;
+            let len = i32::try_from(config.len()).map_err(|_| {
+                "pg_wasm: lifecycle config exceeds i32::MAX bytes".to_string()
+            })?;
+            if !config.is_empty() {
+                let base = MEM_IO_INPUT_BASE as usize;
+                let need = base + config.len();
+                grow_memory_to(store, &memory, need)?;
+                memory
+                    .write(&mut *store, base, config)
+                    .map_err(|e| e.to_string())?;
+            }
+            func
+                .call(
+                    &mut *store,
+                    &[Val::I32(ptr), Val::I32(len)],
+                    &mut [],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        _ => {
+            return Err(format!(
+                "pg_wasm: lifecycle export {export_name:?} must be () -> () or (i32, i32) -> () for core wasm"
+            ));
+        }
+    }
+    after_guest_call_core(module, store, instance);
+    Ok(())
+}
+
+fn call_lifecycle_hook_component<T>(
+    store: &mut Store<T>,
+    instance: &component::Instance,
+    export_name: &str,
+    config: &[u8],
+) -> Result<(), String> {
+    let Some(func) = instance.get_func(&mut *store, export_name) else {
+        return Ok(());
+    };
+    let ty = func.ty(&mut *store);
+    if ty.params().len() != 0 || ty.results().len() != 0 {
+        return Err(format!(
+            "pg_wasm: lifecycle export {export_name:?} must be () -> () for WebAssembly components"
+        ));
+    }
+    let _ = config;
+    func
+        .call(&mut *store, &[], &mut [])
+        .map_err(|e| e.to_string())
 }
 
 fn wasm_types_for_hint(hint: &ExportTypeHint) -> Result<(Vec<ValType>, Vec<ValType>), String> {

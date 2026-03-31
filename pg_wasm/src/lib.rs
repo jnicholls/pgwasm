@@ -410,6 +410,40 @@ mod tests {
 
     #[cfg(feature = "runtime_wasmtime")]
     #[pg_test]
+    fn test_pg_wasm_lifecycle_hooks() {
+        let ext_nsp = extension_schema_name();
+        let hex = wasm_bytes_hex_lower(include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/test_hooks.wasm"
+        )));
+        let opts = serde_json::json!({
+            "hooks": {
+                "on_load": "wasm_nop",
+                "on_unload": "wasm_nop",
+                "on_reconfigure": "wasm_rc",
+            }
+        })
+        .to_string();
+        let load_sql = format!(
+            "SELECT {ext_nsp}.pg_wasm_load(decode('{hex}','hex')::bytea, 'hk'::text, '{}'::jsonb)",
+            opts.replace('\'', "''"),
+        );
+        let mid = Spi::get_one::<i64>(&load_sql)
+            .expect("load hooks wasm")
+            .expect("module id");
+        let v = Spi::get_one::<i32>(&format!("SELECT {ext_nsp}.hk_add(2, 3)"))
+            .expect("add")
+            .expect("non-null");
+        assert_eq!(v, 5);
+        Spi::run(&format!(
+            "SELECT {ext_nsp}.pg_wasm_reconfigure_module({mid}, '{{\"allow_env\": false}}'::jsonb)"
+        ))
+        .expect("reconfigure with hook");
+        Spi::run(&format!("SELECT {ext_nsp}.pg_wasm_unload({mid})")).expect("unload hooks mod");
+    }
+
+    #[cfg(feature = "runtime_wasmtime")]
+    #[pg_test]
     fn test_wasmtime_backend_instantiates() {
         use crate::{RuntimeKind, WasmRuntimeBackend};
 
@@ -532,5 +566,20 @@ mod rust_tests {
     #[test]
     fn registry_lookup_miss_for_invalid_oid() {
         assert!(crate::lookup_by_fn_oid(pg_sys::InvalidOid).is_none());
+    }
+
+    #[test]
+    fn load_options_parse_hooks_object() {
+        let j = serde_json::json!({
+            "hooks": {
+                "on_load": "a",
+                "on_unload": "b",
+                "on_reconfigure": "c",
+            }
+        });
+        let o = crate::LoadOptions::from_jsonb(Some(pgrx::JsonB(j)));
+        assert_eq!(o.hook_on_load.as_deref(), Some("a"));
+        assert_eq!(o.hook_on_unload.as_deref(), Some("b"));
+        assert_eq!(o.hook_on_reconfigure.as_deref(), Some("c"));
     }
 }

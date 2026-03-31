@@ -28,7 +28,7 @@ todos:
     status: completed
   - id: optional-hooks
     content: Configurable on_load, on_unload, on_reconfigure export names; call at lifecycle points.
-    status: pending
+    status: completed
   - id: resource-limits
     content: Per-module and global linear memory and execution limits (e.g. fuel/epoch); enforce at instance/trampoline.
     status: pending

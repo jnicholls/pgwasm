@@ -13,7 +13,7 @@ use crate::{
     },
     proc_reg::{self, RegisterError},
     registry::{
-        self, ModuleCatalogEntry, ModuleId, RegisteredFunction,
+        self, ModuleCatalogEntry, ModuleHooks, ModuleId, RegisteredFunction,
     },
     runtime::wasmtime_backend,
 };
@@ -153,6 +153,19 @@ pub fn load_from_bytes(
             runtime,
         },
     );
+
+    let hooks = ModuleHooks {
+        on_unload: opts.hook_on_unload.clone(),
+        on_reconfigure: opts.hook_on_reconfigure.clone(),
+    };
+    registry::record_module_hooks(id, hooks);
+    if let Some(ref name) = opts.hook_on_load {
+        let blob = opts.config_blob_for_hooks();
+        if let Err(e) = wasmtime_backend::call_lifecycle_hook(id, name, &blob) {
+            warning!("pg_wasm: {e}");
+        }
+    }
+
     Ok(id)
 }
 
@@ -186,6 +199,16 @@ pub fn reconfigure_module(module_id: i64, options: Option<JsonB>) -> Result<(), 
             "pg_wasm_reconfigure_module: unknown module_id {module_id}"
         ))
     })?;
+
+    if let Some(h) = registry::module_hooks(mid) {
+        if let Some(name) = h.on_reconfigure {
+            let blob = serde_json::to_vec(&delta).unwrap_or_default();
+            if let Err(e) = wasmtime_backend::call_lifecycle_hook(mid, &name, &blob) {
+                warning!("pg_wasm: {e}");
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -346,6 +369,13 @@ pub fn unload_module(id: i64) -> Result<(), LoadError> {
         ));
     }
     let mid = ModuleId(id);
+    if let Some(h) = registry::module_hooks(mid) {
+        if let Some(name) = h.on_unload {
+            if let Err(e) = wasmtime_backend::call_lifecycle_hook(mid, &name, &[]) {
+                warning!("pg_wasm: {e}");
+            }
+        }
+    }
     let oids = registry::take_module_proc_oids(mid);
     for oid in oids {
         proc_reg::drop_wasm_trampoline_proc(oid);
@@ -353,6 +383,7 @@ pub fn unload_module(id: i64) -> Result<(), LoadError> {
     let _ = registry::take_module_abi(mid);
     registry::take_module_wasi_and_policy(mid);
     let _ = registry::take_module_catalog(mid);
+    let _ = registry::take_module_hooks(mid);
     crate::metrics::remove_module_memory_peak(mid);
     wasmtime_backend::remove_compiled_module(mid);
     Ok(())
