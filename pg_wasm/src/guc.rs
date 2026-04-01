@@ -12,8 +12,7 @@ pub static PG_WASM_MODULE_PATH: GucSetting<Option<CString>> =
     GucSetting::<Option<CString>>::new(None);
 
 /// Maximum WASM module size in bytes (`pg_wasm.max_module_bytes`).
-pub static PG_WASM_MAX_MODULE_BYTES: GucSetting<i32> =
-    GucSetting::<i32>::new(32 * 1024 * 1024);
+pub static PG_WASM_MAX_MODULE_BYTES: GucSetting<i32> = GucSetting::<i32>::new(32 * 1024 * 1024);
 
 /// Allow reading modules from filesystem paths (`pg_wasm.allow_load_from_file`). Default off.
 pub static PG_WASM_ALLOW_LOAD_FROM_FILE: GucSetting<bool> = GucSetting::<bool>::new(false);
@@ -44,8 +43,7 @@ pub static PG_WASM_COLLECT_METRICS: GucSetting<bool> = GucSetting::<bool>::new(t
 pub static PG_WASM_MAX_MEMORY_PAGES: GucSetting<i32> = GucSetting::<i32>::new(4096);
 
 /// Fuel units per wasm invocation when fuel is enabled (`pg_wasm.fuel_per_invocation`). `0` = unlimited.
-pub static PG_WASM_FUEL_PER_INVOCATION: GucSetting<i32> =
-    GucSetting::<i32>::new(500_000_000);
+pub static PG_WASM_FUEL_PER_INVOCATION: GucSetting<i32> = GucSetting::<i32>::new(500_000_000);
 
 pub fn init() {
     GucRegistry::define_string_guc(
@@ -212,8 +210,7 @@ pub fn allowed_path_prefixes_raw() -> Option<CString> {
 #[must_use]
 pub fn effective_max_memory_pages(module: ModuleId) -> u32 {
     let g = PG_WASM_MAX_MEMORY_PAGES.get().max(0) as u32;
-    let m = crate::registry::module_resource_limits(module)
-        .and_then(|r| r.max_memory_pages);
+    let m = crate::registry::module_resource_limits(module).and_then(|r| r.max_memory_pages);
     match (g, m) {
         (0, None) => 0,
         (0, Some(mp)) => mp,

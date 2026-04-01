@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pgrx::{prelude::*, spi::Spi, JsonB};
+use pgrx::{JsonB, prelude::*, spi::Spi};
 
 use crate::{
     abi::{self, WasmAbiKind},
@@ -12,9 +12,7 @@ use crate::{
         module_path_cstr,
     },
     proc_reg::{self, RegisterError},
-    registry::{
-        self, ModuleCatalogEntry, ModuleHooks, ModuleId, RegisteredFunction,
-    },
+    registry::{self, ModuleCatalogEntry, ModuleHooks, ModuleId, RegisteredFunction},
     runtime::wasmtime_backend,
 };
 
@@ -62,8 +60,7 @@ pub fn load_from_bytes(
                 "pg_wasm_load: unknown abi override {s:?} (use core, extism, or component)"
             ))
         })?,
-        None => abi::detect_wasm_abi(wasm)
-            .map_err(|e| LoadError::Message(e.to_string()))?,
+        None => abi::detect_wasm_abi(wasm).map_err(|e| LoadError::Message(e.to_string()))?,
     };
 
     match abi {
@@ -178,10 +175,14 @@ pub fn reconfigure_module(module_id: i64, options: Option<JsonB>) -> Result<(), 
     }
     let mid = ModuleId(module_id);
     let needs_wasi = registry::module_needs_wasi(mid).ok_or_else(|| {
-        LoadError::Message(format!("pg_wasm_reconfigure_module: unknown module_id {module_id}"))
+        LoadError::Message(format!(
+            "pg_wasm_reconfigure_module: unknown module_id {module_id}"
+        ))
     })?;
     let old = registry::module_policy_overrides(mid).ok_or_else(|| {
-        LoadError::Message(format!("pg_wasm_reconfigure_module: unknown module_id {module_id}"))
+        LoadError::Message(format!(
+            "pg_wasm_reconfigure_module: unknown module_id {module_id}"
+        ))
     })?;
     let delta = match options {
         Some(JsonB(v)) => v,
@@ -202,7 +203,9 @@ pub fn reconfigure_module(module_id: i64, options: Option<JsonB>) -> Result<(), 
     })?;
 
     let old_limits = registry::module_resource_limits(mid).ok_or_else(|| {
-        LoadError::Message(format!("pg_wasm_reconfigure_module: unknown module_id {module_id}"))
+        LoadError::Message(format!(
+            "pg_wasm_reconfigure_module: unknown module_id {module_id}"
+        ))
     })?;
     let merged_limits = merge_resource_limits(old_limits, &delta);
     registry::replace_module_resource_limits(mid, merged_limits).map_err(|()| {
@@ -266,15 +269,13 @@ pub fn resolve_path_and_read(path_arg: &str) -> Result<Vec<u8>, LoadError> {
 
     check_path_policy(&canonical)?;
 
-    let meta = std::fs::metadata(&canonical).map_err(|e| {
-        LoadError::Message(format!("pg_wasm_load: stat {:?}: {e}", canonical))
-    })?;
+    let meta = std::fs::metadata(&canonical)
+        .map_err(|e| LoadError::Message(format!("pg_wasm_load: stat {:?}: {e}", canonical)))?;
     let len = meta.len() as usize;
     enforce_size_limit(len)?;
 
-    let bytes = std::fs::read(&canonical).map_err(|e| {
-        LoadError::Message(format!("pg_wasm_load: read {:?}: {e}", canonical))
-    })?;
+    let bytes = std::fs::read(&canonical)
+        .map_err(|e| LoadError::Message(format!("pg_wasm_load: read {:?}: {e}", canonical)))?;
     enforce_size_limit(bytes.len())?;
     Ok(bytes)
 }

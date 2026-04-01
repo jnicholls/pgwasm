@@ -137,21 +137,27 @@ fn module_hooks_map() -> &'static Mutex<HashMap<ModuleId, ModuleHooks>> {
 
 #[cfg(feature = "runtime_wasmtime")]
 pub fn record_module_hooks(module: ModuleId, hooks: ModuleHooks) {
-    let mut g = module_hooks_map().lock().expect("module hooks map poisoned");
+    let mut g = module_hooks_map()
+        .lock()
+        .expect("module hooks map poisoned");
     g.insert(module, hooks);
 }
 
 #[cfg(feature = "runtime_wasmtime")]
 #[must_use]
 pub fn module_hooks(module: ModuleId) -> Option<ModuleHooks> {
-    let g = module_hooks_map().lock().expect("module hooks map poisoned");
+    let g = module_hooks_map()
+        .lock()
+        .expect("module hooks map poisoned");
     g.get(&module).cloned()
 }
 
 #[cfg(feature = "runtime_wasmtime")]
 #[must_use]
 pub fn take_module_hooks(module: ModuleId) -> Option<ModuleHooks> {
-    let mut g = module_hooks_map().lock().expect("module hooks map poisoned");
+    let mut g = module_hooks_map()
+        .lock()
+        .expect("module hooks map poisoned");
     g.remove(&module)
 }
 
@@ -200,15 +206,24 @@ pub fn module_abi(module: ModuleId) -> Option<WasmAbiKind> {
 
 #[cfg(feature = "runtime_wasmtime")]
 pub fn record_module_wasi_and_policy(module: ModuleId, needs_wasi: bool, policy: PolicyOverrides) {
-    let mut w = module_needs_wasi_map().lock().expect("module wasi map poisoned");
+    let mut w = module_needs_wasi_map()
+        .lock()
+        .expect("module wasi map poisoned");
     w.insert(module, needs_wasi);
-    let mut p = module_policy_overrides_map().lock().expect("module policy map poisoned");
+    let mut p = module_policy_overrides_map()
+        .lock()
+        .expect("module policy map poisoned");
     p.insert(module, policy);
 }
 
 #[cfg(feature = "runtime_wasmtime")]
-pub fn replace_module_policy_overrides(module: ModuleId, policy: PolicyOverrides) -> Result<(), ()> {
-    let mut p = module_policy_overrides_map().lock().expect("module policy map poisoned");
+pub fn replace_module_policy_overrides(
+    module: ModuleId,
+    policy: PolicyOverrides,
+) -> Result<(), ()> {
+    let mut p = module_policy_overrides_map()
+        .lock()
+        .expect("module policy map poisoned");
     if !p.contains_key(&module) {
         return Err(());
     }
@@ -219,14 +234,18 @@ pub fn replace_module_policy_overrides(module: ModuleId, policy: PolicyOverrides
 #[cfg(feature = "runtime_wasmtime")]
 #[must_use]
 pub fn module_needs_wasi(module: ModuleId) -> Option<bool> {
-    let g = module_needs_wasi_map().lock().expect("module wasi map poisoned");
+    let g = module_needs_wasi_map()
+        .lock()
+        .expect("module wasi map poisoned");
     g.get(&module).copied()
 }
 
 #[cfg(feature = "runtime_wasmtime")]
 #[must_use]
 pub fn module_policy_overrides(module: ModuleId) -> Option<PolicyOverrides> {
-    let g = module_policy_overrides_map().lock().expect("module policy map poisoned");
+    let g = module_policy_overrides_map()
+        .lock()
+        .expect("module policy map poisoned");
     g.get(&module).copied()
 }
 
@@ -281,9 +300,13 @@ pub fn take_module_abi(module: ModuleId) -> Option<WasmAbiKind> {
 
 #[cfg(feature = "runtime_wasmtime")]
 pub fn take_module_wasi_and_policy(module: ModuleId) {
-    let mut w = module_needs_wasi_map().lock().expect("module wasi map poisoned");
+    let mut w = module_needs_wasi_map()
+        .lock()
+        .expect("module wasi map poisoned");
     w.remove(&module);
-    let mut p = module_policy_overrides_map().lock().expect("module policy map poisoned");
+    let mut p = module_policy_overrides_map()
+        .lock()
+        .expect("module policy map poisoned");
     p.remove(&module);
     let _ = take_module_resource_limits(module);
 }

@@ -42,9 +42,7 @@ impl ModuleResourceLimits {
     #[must_use]
     pub fn from_json_value(val: &serde_json::Value) -> Self {
         Self {
-            max_memory_pages: val
-                .get("max_memory_pages")
-                .and_then(json_u32_positive),
+            max_memory_pages: val.get("max_memory_pages").and_then(json_u32_positive),
             fuel: val.get("fuel").and_then(json_u64_positive),
         }
     }
@@ -138,10 +136,7 @@ impl LoadOptions {
                 .get("runtime")
                 .and_then(|v| v.as_str())
                 .map(str::to_string),
-            abi_override: val
-                .get("abi")
-                .and_then(|v| v.as_str())
-                .map(str::to_string),
+            abi_override: val.get("abi").and_then(|v| v.as_str()).map(str::to_string),
             hook_on_load,
             hook_on_unload,
             hook_on_reconfigure,
@@ -153,18 +148,18 @@ impl LoadOptions {
 }
 
 /// Parse `hooks` object and/or top-level `on_load` / `hook_on_load`-style keys (plan §9).
-fn hooks_from_json(val: &serde_json::Value) -> (
-    Option<String>,
-    Option<String>,
-    Option<String>,
-) {
+fn hooks_from_json(val: &serde_json::Value) -> (Option<String>, Option<String>, Option<String>) {
     let nested = val.get("hooks").and_then(|v| v.as_object());
     let pick = |short: &str, long: &str| -> Option<String> {
         let s = nested
             .and_then(|m| m.get(short))
             .and_then(serde_json::Value::as_str)
             .or_else(|| val.get(short).and_then(serde_json::Value::as_str))
-            .or_else(|| nested.and_then(|m| m.get(long)).and_then(serde_json::Value::as_str))
+            .or_else(|| {
+                nested
+                    .and_then(|m| m.get(long))
+                    .and_then(serde_json::Value::as_str)
+            })
             .or_else(|| val.get(long).and_then(serde_json::Value::as_str))?;
         let t = s.trim();
         if t.is_empty() {
@@ -213,9 +208,7 @@ pub fn merge_policy_overrides(base: PolicyOverrides, delta: &serde_json::Value) 
 }
 
 fn policy_overrides_from_json(val: &serde_json::Value) -> PolicyOverrides {
-    let policy_obj = val
-        .get("policy")
-        .and_then(serde_json::Value::as_object);
+    let policy_obj = val.get("policy").and_then(serde_json::Value::as_object);
     let pick = |key: &str| -> Option<bool> {
         policy_obj
             .and_then(|m| m.get(key))

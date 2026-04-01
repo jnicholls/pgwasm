@@ -3,7 +3,7 @@
 //! PostgreSQL `prosrc` must be [`TRAMPOLINE_PG_SYMBOL`] (not the `…_wrapper` suffix used by
 //! `#[pg_extern]`), with a matching `pg_finfo_*` entry for the v1 call convention.
 
-use pgrx::{fcinfo::pg_getarg, pg_sys, prelude::*, JsonB};
+use pgrx::{JsonB, fcinfo::pg_getarg, pg_sys, prelude::*};
 
 use crate::mapping::{ExportSignature, PgWasmReturnDesc, PgWasmTypeKind};
 
@@ -177,10 +177,7 @@ fn finish_wasm_trampoline_ok(
 
 #[cfg(feature = "runtime_wasmtime")]
 fn uses_buffer_io(sig: &ExportSignature) -> bool {
-    let buf_ret = matches!(
-        sig.ret.kind,
-        PgWasmTypeKind::String | PgWasmTypeKind::Bytes
-    );
+    let buf_ret = matches!(sig.ret.kind, PgWasmTypeKind::String | PgWasmTypeKind::Bytes);
     if !buf_ret {
         return false;
     }
@@ -195,7 +192,10 @@ fn uses_buffer_io(sig: &ExportSignature) -> bool {
 }
 
 #[cfg(feature = "runtime_wasmtime")]
-fn prepare_buffer_invocation(sig: &ExportSignature, fcinfo: pg_sys::FunctionCallInfo) -> WasmInvocation {
+fn prepare_buffer_invocation(
+    sig: &ExportSignature,
+    fcinfo: pg_sys::FunctionCallInfo,
+) -> WasmInvocation {
     let input: Vec<u8> = match sig.args.len() {
         0 => Vec::new(),
         1 => {
@@ -212,8 +212,9 @@ fn prepare_buffer_invocation(sig: &ExportSignature, fcinfo: pg_sys::FunctionCall
                     serde_json::to_vec(&j.0)
                         .unwrap_or_else(|e| error!("pg_wasm: jsonb encode: {e}"))
                 }
-                (_, PgWasmTypeKind::Bytes) => unsafe { pg_getarg::<Vec<u8>>(fcinfo, 0) }
-                    .expect("pg_wasm: NULL bytea arg"),
+                (_, PgWasmTypeKind::Bytes) => {
+                    unsafe { pg_getarg::<Vec<u8>>(fcinfo, 0) }.expect("pg_wasm: NULL bytea arg")
+                }
                 _ => error!("pg_wasm: unsupported buffer arg combination"),
             }
         }
@@ -223,11 +224,18 @@ fn prepare_buffer_invocation(sig: &ExportSignature, fcinfo: pg_sys::FunctionCall
 }
 
 #[cfg(feature = "runtime_wasmtime")]
-fn prepare_scalar_invocation(reg: &RegisteredFunction, fcinfo: pg_sys::FunctionCallInfo) -> WasmInvocation {
+fn prepare_scalar_invocation(
+    reg: &RegisteredFunction,
+    fcinfo: pg_sys::FunctionCallInfo,
+) -> WasmInvocation {
     let sig = &reg.signature;
     match (sig.args.as_slice(), sig.ret.pg_oid, sig.ret.kind) {
-        ([], _, PgWasmTypeKind::I32) if sig.ret.pg_oid == pg_sys::INT4OID => WasmInvocation::I32Arity0,
-        ([], _, PgWasmTypeKind::I32) if sig.ret.pg_oid == pg_sys::INT2OID => WasmInvocation::I32Arity0,
+        ([], _, PgWasmTypeKind::I32) if sig.ret.pg_oid == pg_sys::INT4OID => {
+            WasmInvocation::I32Arity0
+        }
+        ([], _, PgWasmTypeKind::I32) if sig.ret.pg_oid == pg_sys::INT2OID => {
+            WasmInvocation::I32Arity0
+        }
         ([], _, PgWasmTypeKind::Bool) => WasmInvocation::BoolArity0,
         ([], _, PgWasmTypeKind::I64) => WasmInvocation::I64Arity0,
         ([], _, PgWasmTypeKind::F32) => WasmInvocation::F32Arity0,

@@ -111,8 +111,8 @@ fn record_runtime_extension_membership(addr: &pg_sys::ObjectAddress) -> Result<(
         if pg_sys::creating_extension {
             return Ok(());
         }
-        let extname =
-            CString::new(PG_WASM_EXTENSION_NAME).map_err(|e| RegisterError::Message(e.to_string()))?;
+        let extname = CString::new(PG_WASM_EXTENSION_NAME)
+            .map_err(|e| RegisterError::Message(e.to_string()))?;
         let ext_oid = pg_sys::get_extension_oid(extname.as_ptr(), false);
         if ext_oid == pg_sys::InvalidOid {
             return Err(RegisterError::Message(

@@ -71,9 +71,7 @@ pub fn parse_export_hints(val: &Value) -> Result<ExportHintMap, String> {
     let mut out = ExportHintMap::new();
     for (name, spec) in obj {
         let spec = spec.as_object().ok_or_else(|| {
-            format!(
-                "pg_wasm_load exports.{name}: expected object with args/returns (or return)"
-            )
+            format!("pg_wasm_load exports.{name}: expected object with args/returns (or return)")
         })?;
         let args_val = spec
             .get("args")
@@ -83,9 +81,10 @@ pub fn parse_export_hints(val: &Value) -> Result<ExportHintMap, String> {
         })?;
         let mut args = Vec::with_capacity(args_arr.len());
         for (j, a) in args_arr.iter().enumerate() {
-            args.push(parse_one_sql_type(a).map_err(|e| {
-                format!("pg_wasm_load exports.{name}.args[{j}]: {e}")
-            })?);
+            args.push(
+                parse_one_sql_type(a)
+                    .map_err(|e| format!("pg_wasm_load exports.{name}.args[{j}]: {e}"))?,
+            );
         }
         let ret_key = if spec.contains_key("returns") {
             "returns"
@@ -96,14 +95,12 @@ pub fn parse_export_hints(val: &Value) -> Result<ExportHintMap, String> {
                 "pg_wasm_load exports.{name}: missing \"returns\" (or \"return\")"
             ));
         };
-        let ret = parse_one_sql_type(spec.get(ret_key).ok_or_else(|| {
-            format!("pg_wasm_load exports.{name}: missing returns value")
-        })?)
+        let ret = parse_one_sql_type(
+            spec.get(ret_key)
+                .ok_or_else(|| format!("pg_wasm_load exports.{name}: missing returns value"))?,
+        )
         .map_err(|e| format!("pg_wasm_load exports.{name}.{ret_key}: {e}"))?;
-        let wit_interface = spec
-            .get("wit")
-            .and_then(|w| w.as_str())
-            .map(str::to_string);
+        let wit_interface = spec.get("wit").and_then(|w| w.as_str()).map(str::to_string);
         out.insert(
             name.clone(),
             ExportTypeHint {
