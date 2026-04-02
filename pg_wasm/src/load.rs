@@ -13,7 +13,7 @@ use crate::{
     },
     proc_reg::{self, RegisterError},
     registry::{self, ModuleCatalogEntry, ModuleHooks, ModuleId, RegisteredFunction},
-    runtime::wasmtime_backend,
+    runtime::{dispatch, selection::resolve_load_backend},
 };
 
 const WASM_MAGIC: &[u8; 4] = b"\0asm";
@@ -30,14 +30,14 @@ impl From<RegisterError> for LoadError {
     }
 }
 
-fn cleanup_failed_load(id: ModuleId, oids: &[pgrx::pg_sys::Oid]) {
+fn cleanup_failed_load(id: ModuleId, oids: &[pgrx::pg_sys::Oid], backend: crate::runtime::ModuleExecutionBackend) {
     for o in oids {
         proc_reg::drop_wasm_trampoline_proc(*o);
     }
     let _ = registry::take_module_proc_oids(id);
     registry::take_module_wasi_and_policy(id);
     crate::metrics::remove_module_memory_peak(id);
-    wasmtime_backend::remove_compiled_module(id);
+    dispatch::remove_compiled_module(backend, id);
 }
 
 /// Internal entry for both `pg_wasm_load` overloads.
@@ -63,16 +63,7 @@ pub fn load_from_bytes(
         None => abi::detect_wasm_abi(wasm).map_err(|e| LoadError::Message(e.to_string()))?,
     };
 
-    match abi {
-        WasmAbiKind::ComponentModel => {}
-        WasmAbiKind::Extism => {
-            return Err(LoadError::Message(
-                "Extism plugin ABI detected; pg_wasm only loads core wasm until Extism is integrated"
-                    .into(),
-            ));
-        }
-        WasmAbiKind::CoreWasm => {}
-    }
+    let backend = resolve_load_backend(abi, opts.runtime.as_deref()).map_err(LoadError::Message)?;
 
     let schema = extension_schema_name_spi()?;
     let id = registry::alloc_module_id();
@@ -80,14 +71,14 @@ pub fn load_from_bytes(
 
     let export_hints = opts.export_hints().map_err(LoadError::Message)?;
     let (exports, needs_wasi) =
-        match wasmtime_backend::compile_store_and_list_exports(id, wasm, &export_hints, abi) {
+        match dispatch::compile_store_and_list_exports(backend, id, wasm, &export_hints, abi) {
             Ok(x) => x,
             Err(e) => return Err(LoadError::Message(e)),
         };
 
     let effective = effective_host_policy(&opts.policy);
     if needs_wasi && !effective.allow_wasi {
-        wasmtime_backend::remove_compiled_module(id);
+        cleanup_failed_load(id, &[], backend);
         return Err(LoadError::Message(
             "wasm imports WASI but effective policy denies WASI (enable pg_wasm.allow_wasi and ensure per-module allow_wasi is not false)"
                 .into(),
@@ -95,7 +86,7 @@ pub fn load_from_bytes(
     }
 
     if exports.is_empty() {
-        wasmtime_backend::remove_compiled_module(id);
+        cleanup_failed_load(id, &[], backend);
         return Err(LoadError::Message(
             "no supported wasm function exports (int/float scalars, or use options \"exports\" for text/bytea/jsonb)".into(),
         ));
@@ -104,12 +95,12 @@ pub fn load_from_bytes(
     let mut oids = Vec::new();
     for (export_name, sig) in exports {
         if let Err(e) = proc_reg::assert_sql_identifier(&export_name) {
-            cleanup_failed_load(id, &oids);
+            cleanup_failed_load(id, &oids, backend);
             return Err(e.into());
         }
         let sql_basename = format!("{prefix}_{export_name}");
         if let Err(e) = proc_reg::assert_sql_identifier(&sql_basename) {
-            cleanup_failed_load(id, &oids);
+            cleanup_failed_load(id, &oids, backend);
             return Err(e.into());
         }
 
@@ -129,7 +120,7 @@ pub fn load_from_bytes(
         ) {
             Ok(o) => o,
             Err(e) => {
-                cleanup_failed_load(id, &oids);
+                cleanup_failed_load(id, &oids, backend);
                 return Err(e.into());
             }
         };
@@ -140,15 +131,12 @@ pub fn load_from_bytes(
     registry::record_module_abi(id, abi);
     registry::record_module_wasi_and_policy(id, needs_wasi, opts.policy);
     registry::record_module_resource_limits(id, opts.resource_limits);
-    let runtime = opts
-        .runtime
-        .clone()
-        .unwrap_or_else(|| "wasmtime".to_string());
+    registry::record_module_execution_backend(id, backend);
     registry::record_module_catalog(
         id,
         ModuleCatalogEntry {
             name_prefix: prefix,
-            runtime,
+            runtime: backend.as_catalog_str().to_string(),
         },
     );
 
@@ -159,7 +147,7 @@ pub fn load_from_bytes(
     registry::record_module_hooks(id, hooks);
     if let Some(ref name) = opts.hook_on_load {
         let blob = opts.config_blob_for_hooks();
-        if let Err(e) = wasmtime_backend::call_lifecycle_hook(id, name, &blob) {
+        if let Err(e) = dispatch::call_lifecycle_hook(backend, id, name, &blob) {
             warning!("pg_wasm: {e}");
         }
     }
@@ -217,8 +205,10 @@ pub fn reconfigure_module(module_id: i64, options: Option<JsonB>) -> Result<(), 
     if let Some(h) = registry::module_hooks(mid) {
         if let Some(name) = h.on_reconfigure {
             let blob = serde_json::to_vec(&delta).unwrap_or_default();
-            if let Err(e) = wasmtime_backend::call_lifecycle_hook(mid, &name, &blob) {
-                warning!("pg_wasm: {e}");
+            if let Some(b) = registry::module_execution_backend(mid) {
+                if let Err(e) = dispatch::call_lifecycle_hook(b, mid, &name, &blob) {
+                    warning!("pg_wasm: {e}");
+                }
             }
         }
     }
@@ -383,8 +373,10 @@ pub fn unload_module(id: i64) -> Result<(), LoadError> {
     let mid = ModuleId(id);
     if let Some(h) = registry::module_hooks(mid) {
         if let Some(name) = h.on_unload {
-            if let Err(e) = wasmtime_backend::call_lifecycle_hook(mid, &name, &[]) {
-                warning!("pg_wasm: {e}");
+            if let Some(b) = registry::module_execution_backend(mid) {
+                if let Err(e) = dispatch::call_lifecycle_hook(b, mid, &name, &[]) {
+                    warning!("pg_wasm: {e}");
+                }
             }
         }
     }
@@ -397,6 +389,8 @@ pub fn unload_module(id: i64) -> Result<(), LoadError> {
     let _ = registry::take_module_catalog(mid);
     let _ = registry::take_module_hooks(mid);
     crate::metrics::remove_module_memory_peak(mid);
-    wasmtime_backend::remove_compiled_module(mid);
+    if let Some(b) = registry::take_module_execution_backend(mid) {
+        dispatch::remove_compiled_module(b, mid);
+    }
     Ok(())
 }

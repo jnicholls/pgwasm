@@ -5,7 +5,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 use std::sync::{
     Arc,
     atomic::{AtomicI64, Ordering},
@@ -15,16 +15,19 @@ use pgrx::pg_sys::Oid;
 
 use crate::mapping::ExportSignature;
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 use crate::abi::WasmAbiKind;
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 use crate::config::{ModuleResourceLimits, PolicyOverrides};
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 use crate::metrics::ExportStats;
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
+use crate::runtime::ModuleExecutionBackend;
+
+#[cfg(feature = "_pg_wasm_runtime")]
 static NEXT_MODULE_ID: AtomicI64 = AtomicI64::new(1);
 
 /// Stable handle for a loaded module (bigint / sequence in SQL).
@@ -37,27 +40,27 @@ pub struct RegisteredFunction {
     pub module_id: ModuleId,
     pub export_name: String,
     pub signature: ExportSignature,
-    #[cfg(feature = "runtime_wasmtime")]
+    #[cfg(feature = "_pg_wasm_runtime")]
     pub metrics: Arc<ExportStats>,
 }
 
 /// SQL/catalog row for a loaded module (UDF name prefix, runtime hint).
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[derive(Clone, Debug)]
 pub struct ModuleCatalogEntry {
     pub name_prefix: String,
     pub runtime: String,
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 static MODULE_CATALOG: OnceLock<Mutex<HashMap<ModuleId, ModuleCatalogEntry>>> = OnceLock::new();
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 fn module_catalog_map() -> &'static Mutex<HashMap<ModuleId, ModuleCatalogEntry>> {
     MODULE_CATALOG.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 pub fn record_module_catalog(module: ModuleId, entry: ModuleCatalogEntry) {
     let mut g = module_catalog_map()
         .lock()
@@ -65,7 +68,7 @@ pub fn record_module_catalog(module: ModuleId, entry: ModuleCatalogEntry) {
     g.insert(module, entry);
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn take_module_catalog(module: ModuleId) -> Option<ModuleCatalogEntry> {
     let mut g = module_catalog_map()
@@ -74,7 +77,7 @@ pub fn take_module_catalog(module: ModuleId) -> Option<ModuleCatalogEntry> {
     g.remove(&module)
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn module_catalog(module: ModuleId) -> Option<ModuleCatalogEntry> {
     let g = module_catalog_map()
@@ -83,7 +86,7 @@ pub fn module_catalog(module: ModuleId) -> Option<ModuleCatalogEntry> {
     g.get(&module).cloned()
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn list_module_catalog() -> Vec<(ModuleId, ModuleCatalogEntry)> {
     let g = module_catalog_map()
@@ -92,7 +95,7 @@ pub fn list_module_catalog() -> Vec<(ModuleId, ModuleCatalogEntry)> {
     g.iter().map(|(k, v)| (*k, v.clone())).collect()
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn iter_fn_oid_entries() -> Vec<(Oid, RegisteredFunction)> {
     let g = fn_oid_map().lock().expect("fn_oid map poisoned");
@@ -102,40 +105,75 @@ pub fn iter_fn_oid_entries() -> Vec<(Oid, RegisteredFunction)> {
 static FN_OID_MAP: OnceLock<Mutex<HashMap<Oid, RegisteredFunction>>> = OnceLock::new();
 
 /// Dynamic `pg_proc` OIDs registered for each loaded module (for unload).
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 static MODULE_PROCS: OnceLock<Mutex<HashMap<ModuleId, Vec<Oid>>>> = OnceLock::new();
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 static MODULE_ABI: OnceLock<Mutex<HashMap<ModuleId, WasmAbiKind>>> = OnceLock::new();
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 static MODULE_NEEDS_WASI: OnceLock<Mutex<HashMap<ModuleId, bool>>> = OnceLock::new();
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 static MODULE_POLICY_OVERRIDES: OnceLock<Mutex<HashMap<ModuleId, PolicyOverrides>>> =
     OnceLock::new();
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 static MODULE_RESOURCE_LIMITS: OnceLock<Mutex<HashMap<ModuleId, ModuleResourceLimits>>> =
     OnceLock::new();
 
 /// Persisted lifecycle hook export names (`on_unload`, `on_reconfigure`); `on_load` runs at load only.
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[derive(Clone, Debug, Default)]
 pub struct ModuleHooks {
     pub on_unload: Option<String>,
     pub on_reconfigure: Option<String>,
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 static MODULE_HOOKS: OnceLock<Mutex<HashMap<ModuleId, ModuleHooks>>> = OnceLock::new();
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
+static MODULE_EXECUTION_BACKEND: OnceLock<Mutex<HashMap<ModuleId, ModuleExecutionBackend>>> =
+    OnceLock::new();
+
+#[cfg(feature = "_pg_wasm_runtime")]
 fn module_hooks_map() -> &'static Mutex<HashMap<ModuleId, ModuleHooks>> {
     MODULE_HOOKS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
+fn module_execution_backend_map() -> &'static Mutex<HashMap<ModuleId, ModuleExecutionBackend>> {
+    MODULE_EXECUTION_BACKEND.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(feature = "_pg_wasm_runtime")]
+pub fn record_module_execution_backend(module: ModuleId, backend: ModuleExecutionBackend) {
+    let mut g = module_execution_backend_map()
+        .lock()
+        .expect("module execution backend map poisoned");
+    g.insert(module, backend);
+}
+
+#[cfg(feature = "_pg_wasm_runtime")]
+#[must_use]
+pub fn module_execution_backend(module: ModuleId) -> Option<ModuleExecutionBackend> {
+    let g = module_execution_backend_map()
+        .lock()
+        .expect("module execution backend map poisoned");
+    g.get(&module).copied()
+}
+
+#[cfg(feature = "_pg_wasm_runtime")]
+#[must_use]
+pub fn take_module_execution_backend(module: ModuleId) -> Option<ModuleExecutionBackend> {
+    let mut g = module_execution_backend_map()
+        .lock()
+        .expect("module execution backend map poisoned");
+    g.remove(&module)
+}
+
+#[cfg(feature = "_pg_wasm_runtime")]
 pub fn record_module_hooks(module: ModuleId, hooks: ModuleHooks) {
     let mut g = module_hooks_map()
         .lock()
@@ -143,7 +181,7 @@ pub fn record_module_hooks(module: ModuleId, hooks: ModuleHooks) {
     g.insert(module, hooks);
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn module_hooks(module: ModuleId) -> Option<ModuleHooks> {
     let g = module_hooks_map()
@@ -152,7 +190,7 @@ pub fn module_hooks(module: ModuleId) -> Option<ModuleHooks> {
     g.get(&module).cloned()
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn take_module_hooks(module: ModuleId) -> Option<ModuleHooks> {
     let mut g = module_hooks_map()
@@ -165,46 +203,46 @@ fn fn_oid_map() -> &'static Mutex<HashMap<Oid, RegisteredFunction>> {
     FN_OID_MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 fn module_procs() -> &'static Mutex<HashMap<ModuleId, Vec<Oid>>> {
     MODULE_PROCS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 fn module_abi_map() -> &'static Mutex<HashMap<ModuleId, WasmAbiKind>> {
     MODULE_ABI.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 fn module_needs_wasi_map() -> &'static Mutex<HashMap<ModuleId, bool>> {
     MODULE_NEEDS_WASI.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 fn module_policy_overrides_map() -> &'static Mutex<HashMap<ModuleId, PolicyOverrides>> {
     MODULE_POLICY_OVERRIDES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 fn module_resource_limits_map() -> &'static Mutex<HashMap<ModuleId, ModuleResourceLimits>> {
     MODULE_RESOURCE_LIMITS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Record detected or overridden ABI after a successful load (plan §2).
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 pub fn record_module_abi(module: ModuleId, abi: WasmAbiKind) {
     let mut g = module_abi_map().lock().expect("module abi map poisoned");
     g.insert(module, abi);
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn module_abi(module: ModuleId) -> Option<WasmAbiKind> {
     let g = module_abi_map().lock().expect("module abi map poisoned");
     g.get(&module).copied()
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 pub fn record_module_wasi_and_policy(module: ModuleId, needs_wasi: bool, policy: PolicyOverrides) {
     let mut w = module_needs_wasi_map()
         .lock()
@@ -216,7 +254,7 @@ pub fn record_module_wasi_and_policy(module: ModuleId, needs_wasi: bool, policy:
     p.insert(module, policy);
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 pub fn replace_module_policy_overrides(
     module: ModuleId,
     policy: PolicyOverrides,
@@ -231,7 +269,7 @@ pub fn replace_module_policy_overrides(
     Ok(())
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn module_needs_wasi(module: ModuleId) -> Option<bool> {
     let g = module_needs_wasi_map()
@@ -240,7 +278,7 @@ pub fn module_needs_wasi(module: ModuleId) -> Option<bool> {
     g.get(&module).copied()
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn module_policy_overrides(module: ModuleId) -> Option<PolicyOverrides> {
     let g = module_policy_overrides_map()
@@ -249,7 +287,7 @@ pub fn module_policy_overrides(module: ModuleId) -> Option<PolicyOverrides> {
     g.get(&module).copied()
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 pub fn record_module_resource_limits(module: ModuleId, limits: ModuleResourceLimits) {
     let mut g = module_resource_limits_map()
         .lock()
@@ -257,7 +295,7 @@ pub fn record_module_resource_limits(module: ModuleId, limits: ModuleResourceLim
     g.insert(module, limits);
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn module_resource_limits(module: ModuleId) -> Option<ModuleResourceLimits> {
     let g = module_resource_limits_map()
@@ -266,7 +304,7 @@ pub fn module_resource_limits(module: ModuleId) -> Option<ModuleResourceLimits> 
     g.get(&module).copied()
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 pub fn replace_module_resource_limits(
     module: ModuleId,
     limits: ModuleResourceLimits,
@@ -281,7 +319,7 @@ pub fn replace_module_resource_limits(
     Ok(())
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn take_module_resource_limits(module: ModuleId) -> Option<ModuleResourceLimits> {
     let mut g = module_resource_limits_map()
@@ -291,14 +329,14 @@ pub fn take_module_resource_limits(module: ModuleId) -> Option<ModuleResourceLim
 }
 
 /// Remove and return stored ABI for `module` (e.g. on unload).
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn take_module_abi(module: ModuleId) -> Option<WasmAbiKind> {
     let mut g = module_abi_map().lock().expect("module abi map poisoned");
     g.remove(&module)
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 pub fn take_module_wasi_and_policy(module: ModuleId) {
     let mut w = module_needs_wasi_map()
         .lock()
@@ -311,20 +349,20 @@ pub fn take_module_wasi_and_policy(module: ModuleId) {
     let _ = take_module_resource_limits(module);
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn alloc_module_id() -> ModuleId {
     ModuleId(NEXT_MODULE_ID.fetch_add(1, Ordering::Relaxed))
 }
 
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 pub fn record_module_proc(module: ModuleId, proc_oid: Oid) {
     let mut g = module_procs().lock().expect("module procs poisoned");
     g.entry(module).or_default().push(proc_oid);
 }
 
 /// Removes and returns procedure OIDs registered for `module`, without dropping catalog objects.
-#[cfg(feature = "runtime_wasmtime")]
+#[cfg(feature = "_pg_wasm_runtime")]
 #[must_use]
 pub fn take_module_proc_oids(module: ModuleId) -> Vec<Oid> {
     let mut g = module_procs().lock().expect("module procs poisoned");

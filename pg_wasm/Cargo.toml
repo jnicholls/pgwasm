@@ -16,6 +16,8 @@ path = "./src/bin/pgrx_embed.rs"
 
 [features]
 default = ["pg13", "runtime_wasmtime"]
+# Internal: enabled by each `runtime_*` feature so extension code can use one cfg gate.
+_pg_wasm_runtime = []
 pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
 pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
 pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
@@ -23,9 +25,9 @@ pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
 pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
 pg18 = ["pgrx/pg18", "pgrx-tests/pg18"]
 pg_test = []
-runtime_wasmer = ["dep:wasmer", "dep:wasmparser"]
-runtime_wasmtime = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wasmparser"]
-runtime_extism = ["dep:extism", "dep:wasmparser"]
+runtime_wasmer = ["dep:wasmer", "dep:wasmparser", "_pg_wasm_runtime"]
+runtime_wasmtime = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wasmparser", "_pg_wasm_runtime"]
+runtime_extism = ["dep:extism", "dep:wasmparser", "_pg_wasm_runtime"]
 
 [dependencies]
 anyhow.workspace = true

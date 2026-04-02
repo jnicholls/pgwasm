@@ -15,7 +15,7 @@ pub struct PolicyOverrides {
 
 impl PolicyOverrides {
     /// JSON object for introspection helpers (e.g. `pg_wasm_modules` table function).
-    #[cfg(feature = "runtime_wasmtime")]
+    #[cfg(feature = "_pg_wasm_runtime")]
     #[must_use]
     pub fn to_json_string(self) -> String {
         serde_json::json!({
