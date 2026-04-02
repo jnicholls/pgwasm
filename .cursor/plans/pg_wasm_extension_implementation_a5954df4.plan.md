@@ -34,7 +34,7 @@ todos:
     status: completed
   - id: additional-runtimes
     content: Feature-gate wasmer and extism backends; runtime selection via load options.
-    status: pending
+    status: completed
 isProject: false
 ---
 
