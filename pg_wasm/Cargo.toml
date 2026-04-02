@@ -7,9 +7,6 @@ edition.workspace = true
 [lib]
 crate-type = ["cdylib", "lib"]
 
-[build-dependencies]
-wat.workspace = true
-
 [[bin]]
 name = "pgrx_embed_pg_wasm"
 path = "./src/bin/pgrx_embed.rs"
@@ -39,6 +36,9 @@ wasmtime = { workspace = true, optional = true }
 wasmtime-wasi = { workspace = true, optional = true }
 wasmer = { workspace = true, optional = true }
 extism = { workspace = true, optional = true }
+
+[build-dependencies]
+wat.workspace = true
 
 [dev-dependencies]
 pgrx-tests.workspace = true
