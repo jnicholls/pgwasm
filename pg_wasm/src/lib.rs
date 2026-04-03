@@ -91,7 +91,7 @@ fn pg_wasm_reconfigure_module(module_id: i64, options: Option<JsonB>) {
     }
 }
 
-#[cfg(any(test, feature = "pg_test"))]
+#[cfg(any(test, feature = "pg-test"))]
 #[pg_schema]
 mod tests {
     use pgrx::{JsonB, pg_sys::panic::CaughtError, prelude::*, spi::Spi};

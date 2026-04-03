@@ -1214,7 +1214,7 @@ pub fn call_bool_result_arity2(
     }
 }
 
-#[cfg(any(test, feature = "pg_test"))]
+#[cfg(any(test, feature = "pg-test"))]
 pub fn with_backend<R>(f: impl FnOnce(&WasmtimeBackend) -> R) -> R {
     let g = mutex()
         .lock()
