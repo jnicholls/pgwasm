@@ -30,7 +30,7 @@ pub extern "C-unwind" fn _PG_init() {
 
 #[pg_extern(name = "pg_wasm_load")]
 fn pg_wasm_load_bytea(wasm: &[u8], module_name: Option<&str>, options: Option<JsonB>) -> i64 {
-    match crate::load::load_from_bytes(wasm, module_name, options) {
+    match load::load_from_bytes(wasm, module_name, options) {
         Ok(id) => id.0,
         Err(e) => error!("{e}"),
     }
@@ -38,11 +38,11 @@ fn pg_wasm_load_bytea(wasm: &[u8], module_name: Option<&str>, options: Option<Js
 
 #[pg_extern(name = "pg_wasm_load")]
 fn pg_wasm_load_path(path: &str, module_name: Option<&str>, options: Option<JsonB>) -> i64 {
-    let bytes = match crate::load::resolve_path_and_read(path) {
+    let bytes = match load::resolve_path_and_read(path) {
         Ok(b) => b,
         Err(e) => error!("{e}"),
     };
-    match crate::load::load_from_bytes(&bytes, module_name, options) {
+    match load::load_from_bytes(&bytes, module_name, options) {
         Ok(id) => id.0,
         Err(e) => error!("{e}"),
     }
@@ -50,14 +50,14 @@ fn pg_wasm_load_path(path: &str, module_name: Option<&str>, options: Option<Json
 
 #[pg_extern]
 fn pg_wasm_unload(module_id: i64) {
-    if let Err(e) = crate::load::unload_module(module_id) {
+    if let Err(e) = load::unload_module(module_id) {
         error!("{e}");
     }
 }
 
 #[pg_extern]
 fn pg_wasm_reconfigure_module(module_id: i64, options: Option<JsonB>) {
-    if let Err(e) = crate::load::reconfigure_module(module_id, options) {
+    if let Err(e) = load::reconfigure_module(module_id, options) {
         error!("{e}");
     }
 }
@@ -69,9 +69,11 @@ mod tests {
 
     use crate::{
         abi::WasmAbiKind,
-        mapping::ExportSignature,
+        config::{ModuleResourceLimits, PolicyOverrides},
+        mapping::{ExportHintMap, ExportSignature},
+        metrics,
         registry::{self, RegisteredFunction},
-        runtime::{ModuleExecutionBackend, RuntimeKind, WasmRuntimeBackend},
+        runtime::{self, ModuleExecutionBackend, RuntimeKind, WasmRuntimeBackend},
     };
 
     fn caught_error_message(cause: CaughtError) -> String {
@@ -305,11 +307,11 @@ mod tests {
     fn test_trampoline_dispatch_via_sql_function() {
         let wasm = include_bytes!(concat!(env!("OUT_DIR"), "/test_add.wasm"));
         let mid = registry::alloc_module_id();
-        crate::runtime::wasmtime_backend::compile_store_and_list_exports(
+        runtime::wasmtime_backend::compile_store_and_list_exports(
             mid,
             wasm,
-            &crate::mapping::ExportHintMap::new(),
-            crate::abi::WasmAbiKind::CoreWasm,
+            &ExportHintMap::new(),
+            WasmAbiKind::CoreWasm,
         )
         .expect("smoke compile");
         registry::record_module_execution_backend(mid, ModuleExecutionBackend::Wasmtime);
@@ -317,11 +319,11 @@ mod tests {
         registry::record_module_wasi_and_policy(
             mid,
             false,
-            crate::config::PolicyOverrides::default(),
+            PolicyOverrides::default(),
         );
         registry::record_module_resource_limits(
             mid,
-            crate::config::ModuleResourceLimits::default(),
+            ModuleResourceLimits::default(),
         );
 
         let create_sql = concat!(
@@ -343,7 +345,7 @@ mod tests {
                 module_id: mid,
                 export_name: "forty_two".into(),
                 signature: ExportSignature::default(),
-                metrics: crate::metrics::alloc_export_stats(),
+                metrics: metrics::alloc_export_stats(),
             },
         );
 
@@ -358,7 +360,7 @@ mod tests {
         let _ = registry::take_module_abi(mid);
         registry::take_module_wasi_and_policy(mid);
         let _ = registry::take_module_execution_backend(mid);
-        crate::runtime::wasmtime_backend::remove_compiled_module(mid);
+        runtime::wasmtime_backend::remove_compiled_module(mid);
     }
 
     #[cfg(feature = "runtime-wasmtime")]
@@ -416,7 +418,7 @@ mod tests {
     #[cfg(feature = "runtime-wasmtime")]
     #[pg_test]
     fn test_wasmtime_backend_instantiates() {
-        crate::runtime::wasmtime_backend::with_backend(|b| {
+        runtime::wasmtime_backend::with_backend(|b| {
             assert_eq!(b.kind(), RuntimeKind::Wasmtime);
         });
     }
