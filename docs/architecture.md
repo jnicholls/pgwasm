@@ -22,7 +22,7 @@ The extension is built with [pgrx](https://github.com/pgcentralfoundation/pgrx):
 ```mermaid
 flowchart TB
   subgraph SQL["PostgreSQL"]
-    Load["pg_wasm_load(bytea|text, name, jsonb)"]
+    Load["pg_wasm_load(bytea|text [, name [, jsonb]])"]
     UDF["Dynamic UDFs e.g. prefix_export(...)"]
     GUCs["GUCs: pg_wasm.*"]
     PgProc["pg_proc rows"]

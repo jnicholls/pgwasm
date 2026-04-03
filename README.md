@@ -81,8 +81,7 @@ Assume your extension schema is `pg_wasm` and you have a small WASM binary that 
 -- Replace <hex> with the lowercase hex encoding of your .wasm file.
 SELECT pg_wasm.pg_wasm_load(
   decode('<hex>', 'hex')::bytea,
-  'demo'::text,
-  NULL::jsonb
+  'demo'::text
 ) AS module_id;
 
 -- Functions are named <prefix>_<wasm_export_name>
@@ -123,7 +122,7 @@ Path loads are **off** by default. Set a base directory, allow file loads, then 
 SET pg_wasm.module_path = '/absolute/path/to/modules';
 SET pg_wasm.allow_load_from_file = on;
 
-SELECT pg_wasm.pg_wasm_load('my_module.wasm'::text, 'fsdemo'::text, NULL::jsonb);
+SELECT pg_wasm.pg_wasm_load('my_module.wasm'::text, 'fsdemo'::text);
 ```
 
 Optional comma-separated `pg_wasm.allowed_path_prefixes` restricts which directories are acceptable when you use that mode.
