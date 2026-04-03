@@ -28,11 +28,6 @@ pub extern "C-unwind" fn _PG_init() {
     guc::init();
 }
 
-#[pg_extern]
-fn hello_pg_wasm() -> &'static str {
-    "Hello, pg_wasm"
-}
-
 #[pg_extern(name = "pg_wasm_load")]
 fn pg_wasm_load_bytea(wasm: &[u8], module_name: Option<&str>, options: Option<JsonB>) -> i64 {
     match crate::load::load_from_bytes(wasm, module_name, options) {
@@ -84,11 +79,6 @@ mod tests {
             CaughtError::PostgresError(e) | CaughtError::ErrorReport(e) => e.message().to_string(),
             CaughtError::RustPanic { ereport, .. } => ereport.message().to_string(),
         }
-    }
-
-    #[pg_test]
-    fn test_hello_pg_wasm() {
-        assert_eq!("Hello, pg_wasm", crate::hello_pg_wasm());
     }
 
     /// `CREATE FUNCTION` pointing at the trampoline, then registry + `SELECT` returns the placeholder.
