@@ -1,4 +1,18 @@
-use pgrx::prelude::*;
+use pgrx::{JsonB, prelude::*};
+
+mod abi;
+mod config;
+mod guc;
+mod load;
+mod mapping;
+mod metrics;
+mod proc_reg;
+mod registry;
+mod runtime;
+mod trampoline;
+mod views;
+
+::pgrx::pg_module_magic!(name, version);
 
 #[cfg(not(any(
     feature = "runtime-wasmer",
@@ -8,44 +22,6 @@ use pgrx::prelude::*;
 compile_error!(
     "pg_wasm: enable at least one runtime feature: runtime-wasmer, runtime-wasmtime, or runtime-extism"
 );
-
-use pgrx::JsonB;
-
-mod abi;
-mod config;
-mod guc;
-mod mapping;
-mod proc_reg;
-mod registry;
-mod runtime;
-mod trampoline;
-
-mod load;
-mod metrics;
-mod views;
-
-pub use config::{HostPolicy, LoadOptions, ModuleResourceLimits, PolicyOverrides};
-pub use mapping::{
-    ExportHintMap, ExportSignature, ExportTypeHint, PgWasmArgDesc, PgWasmReturnDesc, PgWasmTypeKind,
-};
-pub use proc_reg::{RegisterError, drop_wasm_trampoline_proc, register_wasm_trampoline_proc};
-pub use registry::ModuleCatalogEntry;
-pub use registry::{
-    ModuleId, RegisteredFunction, lookup_by_fn_oid, register_fn_oid, unregister_fn_oid,
-};
-pub use runtime::ModuleExecutionBackend;
-pub use runtime::{RuntimeKind, StubWasmBackend, WasmRuntimeBackend};
-pub use trampoline::TRAMPOLINE_PG_SYMBOL;
-
-pub use abi::WasmAbiKind;
-#[cfg(feature = "runtime-extism")]
-pub use runtime::extism_backend::ExtismBackend;
-#[cfg(feature = "runtime-wasmer")]
-pub use runtime::wasmer_backend::WasmerBackend;
-#[cfg(feature = "runtime-wasmtime")]
-pub use runtime::wasmtime_backend::WasmtimeBackend;
-
-::pgrx::pg_module_magic!(name, version);
 
 #[pg_guard]
 pub extern "C-unwind" fn _PG_init() {
@@ -97,8 +73,10 @@ mod tests {
     use pgrx::{JsonB, pg_sys::panic::CaughtError, prelude::*, spi::Spi};
 
     use crate::{
+        abi::WasmAbiKind,
         mapping::ExportSignature,
-        registry::{self, RegisteredFunction, register_fn_oid},
+        registry::{self, RegisteredFunction},
+        runtime::{ModuleExecutionBackend, RuntimeKind, WasmRuntimeBackend},
     };
 
     fn caught_error_message(cause: CaughtError) -> String {
@@ -344,8 +322,8 @@ mod tests {
             crate::abi::WasmAbiKind::CoreWasm,
         )
         .expect("smoke compile");
-        registry::record_module_execution_backend(mid, crate::ModuleExecutionBackend::Wasmtime);
-        registry::record_module_abi(mid, crate::abi::WasmAbiKind::CoreWasm);
+        registry::record_module_execution_backend(mid, ModuleExecutionBackend::Wasmtime);
+        registry::record_module_abi(mid, WasmAbiKind::CoreWasm);
         registry::record_module_wasi_and_policy(
             mid,
             false,
@@ -369,7 +347,7 @@ mod tests {
         .expect("spi get oid")
         .expect("missing regprocedure oid");
 
-        register_fn_oid(
+        registry::register_fn_oid(
             oid,
             RegisteredFunction {
                 module_id: mid,
@@ -386,7 +364,7 @@ mod tests {
 
         Spi::run("DROP FUNCTION public.pg_wasm_trampoline_smoke()")
             .expect("drop pg_wasm_trampoline_smoke");
-        crate::unregister_fn_oid(oid);
+        registry::unregister_fn_oid(oid);
         let _ = registry::take_module_abi(mid);
         registry::take_module_wasi_and_policy(mid);
         let _ = registry::take_module_execution_backend(mid);
@@ -448,8 +426,6 @@ mod tests {
     #[cfg(feature = "runtime-wasmtime")]
     #[pg_test]
     fn test_wasmtime_backend_instantiates() {
-        use crate::{RuntimeKind, WasmRuntimeBackend};
-
         crate::runtime::wasmtime_backend::with_backend(|b| {
             assert_eq!(b.kind(), RuntimeKind::Wasmtime);
         });
@@ -634,14 +610,16 @@ pub mod pg_test {
 mod rust_tests {
     use pgrx::pg_sys;
 
+    use crate::{config::LoadOptions, registry, trampoline};
+
     #[test]
     fn trampoline_link_symbol_is_pg_wasm_udf_trampoline() {
-        assert_eq!(crate::TRAMPOLINE_PG_SYMBOL, "pg_wasm_udf_trampoline");
+        assert_eq!(trampoline::TRAMPOLINE_PG_SYMBOL, "pg_wasm_udf_trampoline");
     }
 
     #[test]
     fn registry_lookup_miss_for_invalid_oid() {
-        assert!(crate::lookup_by_fn_oid(pg_sys::InvalidOid).is_none());
+        assert!(registry::lookup_by_fn_oid(pg_sys::InvalidOid).is_none());
     }
 
     #[test]
@@ -653,7 +631,7 @@ mod rust_tests {
                 "on_reconfigure": "c",
             }
         });
-        let o = crate::LoadOptions::from_jsonb(Some(pgrx::JsonB(j)));
+        let o = LoadOptions::from_jsonb(Some(pgrx::JsonB(j)));
         assert_eq!(o.hook_on_load.as_deref(), Some("a"));
         assert_eq!(o.hook_on_unload.as_deref(), Some("b"));
         assert_eq!(o.hook_on_reconfigure.as_deref(), Some("c"));
@@ -665,7 +643,7 @@ mod rust_tests {
             "max_memory_pages": 128,
             "fuel": 999_999
         });
-        let o = crate::LoadOptions::from_jsonb(Some(pgrx::JsonB(j)));
+        let o = LoadOptions::from_jsonb(Some(pgrx::JsonB(j)));
         assert_eq!(o.resource_limits.max_memory_pages, Some(128));
         assert_eq!(o.resource_limits.fuel, Some(999_999));
     }
