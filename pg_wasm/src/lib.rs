@@ -14,13 +14,9 @@ mod views;
 
 ::pgrx::pg_module_magic!(name, version);
 
-#[cfg(not(any(
-    feature = "runtime-wasmer",
-    feature = "runtime-wasmtime",
-    feature = "runtime-extism",
-)))]
+#[cfg(not(any(feature = "runtime-wasmtime", feature = "runtime-extism")))]
 compile_error!(
-    "pg_wasm: enable at least one runtime feature: runtime-wasmer, runtime-wasmtime, or runtime-extism"
+    "pg_wasm: enable at least one runtime feature: runtime-wasmtime or runtime-extism"
 );
 
 #[pg_guard]
@@ -363,10 +359,11 @@ mod tests {
             WasmAbiKind::CoreWasm,
         )
         .expect("smoke compile");
+        registry::record_module_policy_overrides(mid, PolicyOverrides::default());
+        registry::record_module_resource_limits(mid, ModuleResourceLimits::default());
+        registry::record_module_needs_wasi(mid, false);
         registry::record_module_execution_backend(mid, ModuleExecutionBackend::Wasmtime);
         registry::record_module_abi(mid, WasmAbiKind::CoreWasm);
-        registry::record_module_wasi_and_policy(mid, false, PolicyOverrides::default());
-        registry::record_module_resource_limits(mid, ModuleResourceLimits::default());
 
         let create_sql = concat!(
             "CREATE OR REPLACE FUNCTION public.pg_wasm_trampoline_smoke() ",
@@ -548,6 +545,43 @@ mod tests {
             "expected fuel/trap style error, got {msg:?}"
         );
         Spi::run(&format!("SELECT {ext_nsp}.pg_wasm_unload({mid})")).expect("unload spin");
+    }
+
+    #[cfg(all(feature = "runtime-extism", feature = "runtime-wasmtime"))]
+    #[pg_test]
+    fn test_extism_abi_override_fuel_limits_spin() {
+        let ext_nsp = extension_schema_name();
+        let hex = wasm_spin_hex_lower();
+        let opts = serde_json::json!({
+            "abi": "extism",
+            "fuel": 8000,
+        })
+        .to_string();
+        let load_sql = format!(
+            "SELECT {ext_nsp}.pg_wasm_load(decode('{hex}','hex')::bytea, 'exsp'::text, '{}'::jsonb)",
+            opts.replace('\'', "''"),
+        );
+        let mid = Spi::get_one::<i64>(&load_sql)
+            .expect("load spin as extism abi")
+            .expect("mid");
+        let msg = PgTryBuilder::new(|| {
+            match Spi::get_one::<i32>(&format!("SELECT {ext_nsp}.exsp_spin()")) {
+                Err(e) => format!("{e}"),
+                Ok(Some(_)) => "__unexpected_ok__".to_string(),
+                Ok(None) => "__unexpected_null__".to_string(),
+            }
+        })
+        .catch_when(PgSqlErrorCode::ERRCODE_INTERNAL_ERROR, caught_error_message)
+        .execute();
+        assert!(
+            msg.contains("fuel")
+                || msg.contains("Fuel")
+                || msg.contains("trap")
+                || msg.contains("wasm")
+                || msg.contains("plugin ran out of fuel"),
+            "expected fuel/trap style error, got {msg:?}"
+        );
+        Spi::run(&format!("SELECT {ext_nsp}.pg_wasm_unload({mid})")).expect("unload exspin");
     }
 
     #[cfg(feature = "runtime-wasmtime")]

@@ -193,15 +193,18 @@ pub fn module_abi(module: ModuleId) -> Option<WasmAbiKind> {
     g.get(&module).copied()
 }
 
-pub fn record_module_wasi_and_policy(module: ModuleId, needs_wasi: bool, policy: PolicyOverrides) {
-    let mut w = module_needs_wasi_map()
-        .lock()
-        .expect("module wasi map poisoned");
-    w.insert(module, needs_wasi);
+pub fn record_module_policy_overrides(module: ModuleId, policy: PolicyOverrides) {
     let mut p = module_policy_overrides_map()
         .lock()
         .expect("module policy map poisoned");
     p.insert(module, policy);
+}
+
+pub fn record_module_needs_wasi(module: ModuleId, needs_wasi: bool) {
+    let mut w = module_needs_wasi_map()
+        .lock()
+        .expect("module wasi map poisoned");
+    w.insert(module, needs_wasi);
 }
 
 pub fn replace_module_policy_overrides(

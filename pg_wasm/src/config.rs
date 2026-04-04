@@ -88,7 +88,7 @@ fn json_u64_positive(v: &serde_json::Value) -> Option<u64> {
 /// Per-module and load-time options passed as JSONB to `pg_wasm_load` (see plan §8–9).
 #[derive(Debug, Default)]
 pub struct LoadOptions {
-    /// Preferred runtime when multiple backends are compiled in (`wasmtime`, `wasmer`, `extism`).
+    /// Preferred runtime when multiple backends are compiled in (`wasmtime`, `extism`).
     pub runtime: Option<String>,
     /// Override ABI detection: `core`, `extism`, or `component` (see plan §2).
     pub abi_override: Option<String>,

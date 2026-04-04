@@ -4,7 +4,7 @@ This document describes how the **pg_wasm** PostgreSQL extension is organized, h
 
 ## Purpose
 
-pg_wasm loads WebAssembly binaries into a PostgreSQL backend process, exposes selected WASM exports as ordinary SQL functions, and routes each call through a single C entry point (the **trampoline**) into a pluggable **runtime backend** (Wasmtime, Wasmer, or Extism, depending on build features and module ABI).
+pg_wasm loads WebAssembly binaries into a PostgreSQL backend process, exposes selected WASM exports as ordinary SQL functions, and routes each call through a single C entry point (the **trampoline**) into a pluggable **runtime backend** (**Wasmtime** for core modules and components, or **Extism** for the Extism plugin ABI, depending on build features and module ABI). Extism embeds its own Wasmtime stack (see **Wasmtime versions** below).
 
 ## Repository layout
 
@@ -37,7 +37,7 @@ flowchart TB
     ProcReg["proc_reg.rs"]
     Tramp["trampoline.rs"]
     Reg["registry.rs"]
-    Backends["wasmtime_backend / wasmer_backend / extism_backend"]
+    Backends["wasmtime_backend / extism_backend"]
   end
 
   GUCs --> LoadMod
@@ -71,7 +71,7 @@ flowchart TB
 | `proc_reg` | `ProcedureCreate` / `RemoveFunctionById`, extension dependency for dynamic `pg_proc` rows |
 | `registry` | Process-local `ModuleId`, `fn_oid → RegisteredFunction`, policy, WASI flags, catalog entries |
 | `runtime/dispatch` | Match on `ModuleExecutionBackend` and forward compile/call/teardown |
-| `runtime/selection` | Map detected ABI + `options.runtime` to Wasmtime / Wasmer / Extism |
+| `runtime/selection` | Map detected ABI + `options.runtime` to Wasmtime or Extism |
 | `trampoline` | `pg_wasm_udf_trampoline`: `fcinfo` → registry → argument marshaling → dispatch → datum return |
 | `views` | Table functions `pg_wasm_modules()`, `pg_wasm_functions()`, `pg_wasm_stats()` |
 
@@ -107,7 +107,7 @@ Callers may override detection with load options, e.g. `"abi": "core"` / `"extis
 |-----|-------------|
 | **ComponentModel** | Requires **Wasmtime** (and the `runtime-wasmtime` feature). `runtime` may be `"wasmtime"` or `"auto"`. |
 | **Extism** | Requires **Extism** backend (`runtime-extism`). |
-| **CoreWasm** | `runtime`: `"auto"` picks a default among enabled engines (Wasmtime preferred if present), or `"wasmtime"` / `"wasmer"` explicitly. `"extism"` is rejected for plain core modules. |
+| **CoreWasm** | `runtime`: `"auto"` picks Wasmtime if enabled, otherwise Extism; or `"wasmtime"` / `"extism"` explicitly (`"extism"` is rejected for plain core modules unless you override `abi`). |
 
 The chosen backend is stored per module in `registry` and used for every invocation and for `remove_compiled_module` on unload.
 
@@ -127,19 +127,21 @@ sequenceDiagram
   Load->>Load: superuser, size, magic prefix
   Load->>Abi: classify (or override)
   Load->>Sel: backend for ABI + options.runtime
+  Load->>Reg: resource limits + policy overrides (before compile)
   Load->>Disp: compile, list exports, needs_wasi
   Disp-->>Load: Vec (export_name, ExportSignature), needs_wasi
   loop Each supported export
     Load->>PR: ProcedureCreate + register_fn_oid
     PR->>Reg: record_module_proc, FN_OID_MAP
   end
-  Load->>Reg: ABI, policy, limits, hooks, catalog
+  Load->>Reg: needs_wasi, ABI, hooks, catalog (limits/policy already recorded)
 ```
 
 Important details:
 
 - **Superuser** is required for load, unload, reconfigure, and path-based load.
 - **WASI:** if the module needs WASI, effective policy (GUCs merged with per-module overrides) must allow it or load fails after cleanup.
+- **Extism:** `extism_backend` builds an Extism `Manifest` using the same effective **fuel**, **memory page cap**, **network** (`allowed_hosts`), and **WASI preopens** (`allowed_paths` from `pg_wasm.module_path`) as the direct Wasmtime path, where Extism’s manifest supports them. Per-process **Wasmtime `Config`** (e.g. Cranelift flags in `WasmtimeBackend::empty`) applies only to the direct Wasmtime engine until Extism’s dependency aligns with the workspace Wasmtime semver (see below). **WASI environment inheritance** (`allow_env`) is enforced for Wasmtime’s WASI builders; Extism’s internal `wasi-common` path does not mirror that knob. **`pg_wasm_reconfigure_module`** updates registry limits/policy for Wasmtime immediately on the next instantiate; for Extism, fuel and manifest options are fixed at **compile** time—reload the module to pick up new limits.
 - **Exports:** only signatures the stack understands are registered (scalar int/float/bool and buffer-style text/bytea/jsonb when described via `exports` in JSON). Empty export list ⇒ load error.
 
 ## Function registration and PostgreSQL catalog
@@ -219,17 +221,20 @@ Defined in `views.rs`, backed by **`registry`** and **metrics**:
 The crate **must** enable at least one of:
 
 - `runtime-wasmtime` (default in `pg_wasm/Cargo.toml`)
-- `runtime-wasmer`
 - `runtime-extism`
 
-PostgreSQL major version is selected via `pg13` … `pg18` features on the `pg_wasm` crate. The `wasmtime` workspace dependency enables **component model** support, which aligns with component ABI handling in selection and backend code.
+PostgreSQL major version is selected via `pg13` … `pg18` features on the `pg_wasm` crate. The workspace `wasmtime` dependency enables **component model** support for the direct Wasmtime backend.
+
+### Wasmtime versions (Extism vs direct)
+
+The **Extism** crate pins an older **Wasmtime** release than the workspace `wasmtime` used by `wasmtime_backend`. The binary therefore links **two** Wasmtime versions until upstream aligns them or you use a `[patch.crates-io]` override. Extism does not accept an external `Engine` instance; each `CompiledPlugin` owns its engine. `PluginBuilder::with_wasmtime_config` is only useful once types share the same Wasmtime semver as Extism.
 
 ## Mental model for contributors
 
 1. **Adding a new SQL-visible function:** usually `#[pg_extern]` in `lib.rs` or `views.rs`, following pgrx patterns.
 2. **Changing how modules load:** `load.rs`, `config.rs`, and possibly `abi.rs` / `selection.rs`.
 3. **New WASM calling conventions or types:** `mapping.rs`, then `trampoline.rs` (argument/return marshaling), then each backend’s `compile_store_and_list_exports` and `call_*` implementations, plus `dispatch.rs` wiring.
-4. **Engine-specific behavior:** `runtime/wasmtime_backend.rs`, `wasmer_backend.rs`, or `extism_backend.rs`; keep `dispatch.rs` as a thin match to avoid cross-crate leakage from the trampoline.
+4. **Engine-specific behavior:** `runtime/wasmtime_backend.rs` or `extism_backend.rs`; keep `dispatch.rs` as a thin match to avoid cross-crate leakage from the trampoline.
 5. **Security / policy:** `guc.rs`, `config::PolicyOverrides`, and checks in `load.rs` / backends for WASI and host imports.
 
 ## Related reading in-tree

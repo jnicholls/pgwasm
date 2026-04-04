@@ -6,7 +6,7 @@
 
 - **Load WASM from SQL** — `pg_wasm_load(bytea, …)` embeds a module in the current session’s backend; optional `pg_wasm_load(text, …)` reads from disk when allowed by configuration.
 - **Automatic ABI detection** — Classifies binaries as **core WASM**, **WebAssembly components**, or **Extism** plugins (via import modules), with an optional JSON override.
-- **Pluggable runtimes** — Build with **Wasmtime** (default), **Wasmer**, and/or **Extism**; the loader picks a backend based on ABI and `options.runtime` (`auto`, `wasmtime`, `wasmer`, `extism`).
+- **Pluggable runtimes** — Build with **Wasmtime** and/or **Extism**; the loader picks a backend based on ABI and `options.runtime` (`auto`, `wasmtime`, `extism`). Extism uses Wasmtime internally; direct Wasmtime supports components, WASI preview 1/2, and full host policy.
 - **Dynamic SQL functions** — Supported exports become `schema.prefix_exportname(...)` without hand-written `CREATE FUNCTION` per export; strict C-language functions share one trampoline symbol.
 - **Scalar and buffer APIs** — Integer, boolean, and float scalars; `text`, `bytea`, and `jsonb` via explicit `exports` hints in load options.
 - **Optional WASI** — Modules that import WASI can be loaded when global and per-module policy allows it.
@@ -22,7 +22,7 @@ For a deeper walkthrough of modules and data flow, see [docs/architecture.md](do
 - **PostgreSQL** installation with development headers (`pg_config` on your `PATH`, or pass `--pg-config` to pgrx).
 - **[cargo-pgrx](https://crates.io/crates/cargo-pgrx)** compatible with the pgrx version pinned in this repo (see `[workspace.dependencies]` in the root `Cargo.toml`).
 
-At least one runtime feature must stay enabled: `runtime-wasmtime`, `runtime-wasmer`, or `runtime-extism` (defaults include Wasmtime).
+At least one runtime feature must stay enabled: `runtime-wasmtime` and/or `runtime-extism` (defaults include both Wasmtime and Extism).
 
 ## Getting started
 
@@ -44,7 +44,7 @@ cd pg_wasm
 cargo build --no-default-features --features "pg17,runtime-wasmtime"
 ```
 
-Add `runtime-wasmer` and/or `runtime-extism` to the feature list if you want those backends compiled in.
+Add `runtime-extism` if you want Extism-backed loads (e.g. `abi: extism` or modules with `extism:host/*` imports).
 
 ### 3. Build and install the extension
 

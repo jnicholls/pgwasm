@@ -7,8 +7,6 @@ use crate::abi::WasmAbiKind;
 pub enum ModuleExecutionBackend {
     #[cfg(feature = "runtime-wasmtime")]
     Wasmtime,
-    #[cfg(feature = "runtime-wasmer")]
-    Wasmer,
     #[cfg(feature = "runtime-extism")]
     Extism,
 }
@@ -18,8 +16,6 @@ impl ModuleExecutionBackend {
         match self {
             #[cfg(feature = "runtime-wasmtime")]
             Self::Wasmtime => "wasmtime",
-            #[cfg(feature = "runtime-wasmer")]
-            Self::Wasmer => "wasmer",
             #[cfg(feature = "runtime-extism")]
             Self::Extism => "extism",
         }
@@ -40,19 +36,11 @@ fn default_core_backend() -> Result<ModuleExecutionBackend, String> {
     {
         return Ok(ModuleExecutionBackend::Wasmtime);
     }
-    #[cfg(all(not(feature = "runtime-wasmtime"), feature = "runtime-wasmer"))]
-    {
-        return Ok(ModuleExecutionBackend::Wasmer);
-    }
-    #[cfg(all(
-        not(feature = "runtime-wasmtime"),
-        not(feature = "runtime-wasmer"),
-        feature = "runtime-extism"
-    ))]
+    #[cfg(all(not(feature = "runtime-wasmtime"), feature = "runtime-extism"))]
     {
         return Ok(ModuleExecutionBackend::Extism);
     }
-    unreachable!("pg_wasm: enable at least one runtime-wasmer, runtime-wasmtime, or runtime-extism feature")
+    unreachable!("pg_wasm: enable at least one runtime-wasmtime or runtime-extism feature")
 }
 
 /// Pick the backend for `load_from_bytes` after ABI detection.
@@ -115,22 +103,12 @@ pub fn resolve_load_backend(
                         Err("pg_wasm_load: runtime \"wasmtime\" requires the `runtime-wasmtime` feature".into())
                     }
                 }
-                "wasmer" => {
-                    #[cfg(feature = "runtime-wasmer")]
-                    {
-                        Ok(ModuleExecutionBackend::Wasmer)
-                    }
-                    #[cfg(not(feature = "runtime-wasmer"))]
-                    {
-                        Err("pg_wasm_load: runtime \"wasmer\" requires the `runtime-wasmer` feature".into())
-                    }
-                }
                 "extism" => Err(
                     "pg_wasm_load: runtime \"extism\" is only valid for Extism plugin wasm (extism:host imports)"
                         .into(),
                 ),
                 other => Err(format!(
-                    "pg_wasm_load: unknown runtime {other:?} (use wasmtime, wasmer, extism, or auto)"
+                    "pg_wasm_load: unknown runtime {other:?} (use wasmtime, extism, or auto)"
                 )),
             }
         }

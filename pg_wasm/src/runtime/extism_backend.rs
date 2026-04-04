@@ -1,15 +1,17 @@
-//! Extism backend: loads wasm through Extism’s `CompiledPlugin` / `Plugin` API.
+//! Extism backend: loads wasm through Extism’s `CompiledPlugin` / `Plugin` API (Wasmtime inside Extism).
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
 };
 
-use extism::{CompiledPlugin, Plugin, PluginBuilder};
+use extism::{CompiledPlugin, Manifest, Plugin, PluginBuilder, Wasm, WasmMetadata};
 
 use super::{RuntimeKind, WasmRuntimeBackend};
 use crate::{
     abi::WasmAbiKind,
+    guc,
     mapping::{ExportHintMap, ExportSignature},
     registry::ModuleId,
 };
@@ -44,6 +46,49 @@ fn with_plugin<R>(
     f(&mut plugin)
 }
 
+/// Build an Extism manifest aligned with effective GUC + per-module policy and resource limits
+/// (requires `registry::record_module_resource_limits` and `record_module_policy_overrides` before compile).
+fn extism_manifest_for_load(
+    id: ModuleId,
+    wasm: &[u8],
+    needs_wasi: bool,
+) -> Result<Manifest, String> {
+    let wasm_entry = Wasm::Data {
+        data: wasm.to_vec(),
+        meta: WasmMetadata {
+            name: Some("main".to_string()),
+            hash: None,
+        },
+    };
+    let mut manifest = Manifest::new(vec![wasm_entry]);
+    let pages = guc::effective_max_memory_pages(id);
+    if pages > 0 {
+        manifest = manifest.with_memory_max(pages);
+    }
+    let overrides = crate::registry::module_policy_overrides(id).unwrap_or_default();
+    let policy = guc::effective_host_policy(&overrides);
+    if !policy.allow_network {
+        manifest = manifest.disallow_all_hosts();
+    }
+    if needs_wasi && (policy.allow_fs_read || policy.allow_fs_write) {
+        if let Some(cs) = guc::module_path_cstr() {
+            let base_str = cs.to_str().map_err(|_| {
+                "pg_wasm.module_path must be valid UTF-8 for Extism WASI allowed_paths".to_string()
+            })?;
+            let mut paths = BTreeMap::new();
+            if policy.allow_fs_write {
+                paths.insert(base_str.to_string(), PathBuf::from("/"));
+            } else if policy.allow_fs_read {
+                paths.insert(format!("ro:{base_str}"), PathBuf::from("/"));
+            }
+            if !paths.is_empty() {
+                manifest.allowed_paths = Some(paths);
+            }
+        }
+    }
+    Ok(manifest)
+}
+
 pub fn compile_store_and_list_exports(
     id: ModuleId,
     wasm: &[u8],
@@ -60,8 +105,13 @@ pub fn compile_store_and_list_exports(
     }
     let (exports, needs_wasi) =
         super::wasm_bytes_exports::list_core_exports_from_wasm_bytes(wasm, export_hints)?;
-    let compiled = CompiledPlugin::new(PluginBuilder::new(wasm).with_wasi(needs_wasi))
-        .map_err(|e| format!("pg_wasm: extism compile: {e}"))?;
+    let manifest = extism_manifest_for_load(id, wasm, needs_wasi)?;
+    let fuel = guc::effective_fuel_per_invocation(id);
+    let mut builder = PluginBuilder::new(manifest).with_wasi(needs_wasi);
+    if fuel != u64::MAX {
+        builder = builder.with_fuel_limit(fuel);
+    }
+    let compiled = CompiledPlugin::new(builder).map_err(|e| format!("pg_wasm: extism compile: {e}"))?;
     let mut g = mutex().lock().map_err(|e| e.to_string())?;
     g.artifacts.insert(id, Arc::new(compiled));
     Ok((exports, needs_wasi))
@@ -132,7 +182,7 @@ pub fn call_i32_arity1(module: ModuleId, export: &str, a: i32) -> Result<i32, St
 pub fn call_i32_arity2(module: ModuleId, export: &str, _a: i32, _b: i32) -> Result<i32, String> {
     let _ = (module, export);
     Err(
-        "pg_wasm: Extism runtime does not support 2×i32 scalar wasm calls; use wasmtime or wasmer"
+        "pg_wasm: Extism runtime does not support 2×i32 scalar wasm calls; use the wasmtime runtime"
             .into(),
     )
 }
@@ -168,7 +218,7 @@ pub fn call_f32_arity1(module: ModuleId, export: &str, a: f32) -> Result<f32, St
 pub fn call_f32_arity2(module: ModuleId, export: &str, _a: f32, _b: f32) -> Result<f32, String> {
     let _ = (module, export);
     Err(
-        "pg_wasm: Extism runtime does not support 2×f32 scalar wasm calls; use wasmtime or wasmer"
+        "pg_wasm: Extism runtime does not support 2×f32 scalar wasm calls; use the wasmtime runtime"
             .into(),
     )
 }
@@ -190,7 +240,7 @@ pub fn call_f64_arity1(module: ModuleId, export: &str, a: f64) -> Result<f64, St
 pub fn call_f64_arity2(module: ModuleId, export: &str, _a: f64, _b: f64) -> Result<f64, String> {
     let _ = (module, export);
     Err(
-        "pg_wasm: Extism runtime does not support 2×f64 scalar wasm calls; use wasmtime or wasmer"
+        "pg_wasm: Extism runtime does not support 2×f64 scalar wasm calls; use the wasmtime runtime"
             .into(),
     )
 }
@@ -217,7 +267,7 @@ pub fn call_bool_result_arity2(
 ) -> Result<bool, String> {
     let _ = (module, export);
     Err(
-        "pg_wasm: Extism runtime does not support 2×bool scalar wasm calls; use wasmtime or wasmer"
+        "pg_wasm: Extism runtime does not support 2×bool scalar wasm calls; use the wasmtime runtime"
             .into(),
     )
 }

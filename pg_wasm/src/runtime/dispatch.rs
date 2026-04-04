@@ -5,8 +5,6 @@ use crate::runtime::selection::ModuleExecutionBackend;
 
 #[cfg(feature = "runtime-extism")]
 use super::extism_backend;
-#[cfg(feature = "runtime-wasmer")]
-use super::wasmer_backend;
 #[cfg(feature = "runtime-wasmtime")]
 use super::wasmtime_backend;
 
@@ -14,8 +12,6 @@ pub fn remove_compiled_module(backend: ModuleExecutionBackend, id: ModuleId) {
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::remove_compiled_module(id),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::remove_compiled_module(id),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::remove_compiled_module(id),
     }
@@ -32,10 +28,6 @@ pub fn compile_store_and_list_exports(
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => {
             wasmtime_backend::compile_store_and_list_exports(id, wasm, export_hints, abi)
-        }
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => {
-            wasmer_backend::compile_store_and_list_exports(id, wasm, export_hints, abi)
         }
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => {
@@ -55,10 +47,6 @@ pub fn call_lifecycle_hook(
         ModuleExecutionBackend::Wasmtime => {
             wasmtime_backend::call_lifecycle_hook(module, export_name, config)
         }
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => {
-            wasmer_backend::call_lifecycle_hook(module, export_name, config)
-        }
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => {
             extism_backend::call_lifecycle_hook(module, export_name, config)
@@ -75,8 +63,6 @@ pub fn call_mem_in_out(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_mem_in_out(module, export, input),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_mem_in_out(module, export, input),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_mem_in_out(module, export, input),
     }
@@ -90,8 +76,6 @@ pub fn call_i32_arity0(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_i32_arity0(module, export),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_i32_arity0(module, export),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_i32_arity0(module, export),
     }
@@ -106,8 +90,6 @@ pub fn call_i32_arity1(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_i32_arity1(module, export, a),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_i32_arity1(module, export, a),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_i32_arity1(module, export, a),
     }
@@ -123,8 +105,6 @@ pub fn call_i32_arity2(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_i32_arity2(module, export, a, b),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_i32_arity2(module, export, a, b),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_i32_arity2(module, export, a, b),
     }
@@ -140,8 +120,6 @@ pub fn call_bool_result_arity0(
         ModuleExecutionBackend::Wasmtime => {
             wasmtime_backend::call_bool_result_arity0(module, export)
         }
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_bool_result_arity0(module, export),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_bool_result_arity0(module, export),
     }
@@ -158,8 +136,6 @@ pub fn call_bool_result_arity1(
         ModuleExecutionBackend::Wasmtime => {
             wasmtime_backend::call_bool_result_arity1(module, export, a)
         }
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_bool_result_arity1(module, export, a),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_bool_result_arity1(module, export, a),
     }
@@ -177,10 +153,6 @@ pub fn call_bool_result_arity2(
         ModuleExecutionBackend::Wasmtime => {
             wasmtime_backend::call_bool_result_arity2(module, export, a, b)
         }
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => {
-            wasmer_backend::call_bool_result_arity2(module, export, a, b)
-        }
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => {
             extism_backend::call_bool_result_arity2(module, export, a, b)
@@ -196,8 +168,6 @@ pub fn call_i64_arity0(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_i64_arity0(module, export),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_i64_arity0(module, export),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_i64_arity0(module, export),
     }
@@ -212,8 +182,6 @@ pub fn call_i64_arity1(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_i64_arity1(module, export, a),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_i64_arity1(module, export, a),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_i64_arity1(module, export, a),
     }
@@ -227,8 +195,6 @@ pub fn call_f32_arity0(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_f32_arity0(module, export),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_f32_arity0(module, export),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_f32_arity0(module, export),
     }
@@ -243,8 +209,6 @@ pub fn call_f32_arity1(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_f32_arity1(module, export, a),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_f32_arity1(module, export, a),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_f32_arity1(module, export, a),
     }
@@ -260,8 +224,6 @@ pub fn call_f32_arity2(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_f32_arity2(module, export, a, b),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_f32_arity2(module, export, a, b),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_f32_arity2(module, export, a, b),
     }
@@ -275,8 +237,6 @@ pub fn call_f64_arity0(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_f64_arity0(module, export),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_f64_arity0(module, export),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_f64_arity0(module, export),
     }
@@ -291,8 +251,6 @@ pub fn call_f64_arity1(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_f64_arity1(module, export, a),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_f64_arity1(module, export, a),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_f64_arity1(module, export, a),
     }
@@ -308,8 +266,6 @@ pub fn call_f64_arity2(
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
         ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_f64_arity2(module, export, a, b),
-        #[cfg(feature = "runtime-wasmer")]
-        ModuleExecutionBackend::Wasmer => wasmer_backend::call_f64_arity2(module, export, a, b),
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_f64_arity2(module, export, a, b),
     }

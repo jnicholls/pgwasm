@@ -70,10 +70,15 @@ pub fn load_from_bytes(
     let prefix = module_sql_prefix(module_name, id)?;
 
     let export_hints = opts.export_hints().map_err(LoadError::Message)?;
+    registry::record_module_resource_limits(id, opts.resource_limits);
+    registry::record_module_policy_overrides(id, opts.policy);
     let (exports, needs_wasi) =
         match dispatch::compile_store_and_list_exports(backend, id, wasm, &export_hints, abi) {
             Ok(x) => x,
-            Err(e) => return Err(LoadError::Message(e)),
+            Err(e) => {
+                registry::take_module_wasi_and_policy(id);
+                return Err(LoadError::Message(e));
+            }
         };
 
     let effective = effective_host_policy(&opts.policy);
@@ -129,8 +134,7 @@ pub fn load_from_bytes(
     }
 
     registry::record_module_abi(id, abi);
-    registry::record_module_wasi_and_policy(id, needs_wasi, opts.policy);
-    registry::record_module_resource_limits(id, opts.resource_limits);
+    registry::record_module_needs_wasi(id, needs_wasi);
     registry::record_module_execution_backend(id, backend);
     registry::record_module_catalog(
         id,

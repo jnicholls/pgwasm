@@ -9,11 +9,10 @@ pub mod extism_backend;
 pub mod selection;
 #[cfg(feature = "runtime-extism")]
 pub mod wasm_bytes_exports;
-#[cfg(feature = "runtime-wasmer")]
-pub mod wasmer_backend;
 #[cfg(feature = "runtime-wasmtime")]
 pub mod wasmtime_backend;
 
+#[allow(unused_imports)]
 pub use stub::StubWasmBackend;
 pub use selection::ModuleExecutionBackend;
 
@@ -21,7 +20,6 @@ pub use selection::ModuleExecutionBackend;
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum RuntimeKind {
     Wasmtime,
-    Wasmer,
     Extism,
 }
 

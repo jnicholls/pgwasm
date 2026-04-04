@@ -27,10 +27,6 @@ wasmtime-wasi = { version = "43", default-features = false, features = [
     "p1",
     "p2",
 ] }
-wasmer = { version = "7", default-features = false, features = [
-    "std",
-    "cranelift",
-] }
 wat = "1"
 
 [profile.dev]
