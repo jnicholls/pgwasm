@@ -15,7 +15,7 @@ mod track_b_component_types;
 mod trampoline;
 mod views;
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 #[used]
 static PG_WASM_MACOS_TEST_STUB_LINK: fn() = pg_wasm_macos_test_stub::ensure_linked;
 

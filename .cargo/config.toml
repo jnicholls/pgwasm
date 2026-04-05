@@ -1,3 +1,10 @@
+[target.x86_64-unknown-linux-gnu]
+# Rust >= 1.86 defaults to rust-lld on x86_64-linux-gnu which is strict
+# about unresolved symbols.  pgrx test binaries expect PostgreSQL symbols
+# to be resolved at load time, so allow unresolved symbols in the linker
+# (same idea as the macOS stanza).
+rustflags = ["-Clink-arg=-Wl,--unresolved-symbols=ignore-all"]
+
 [target.'cfg(target_os = "macos")']
 # PostgreSQL symbols are resolved when the extension loads into the server.
 rustflags = ["-Clink-arg=-Wl,-undefined,dynamic_lookup"]

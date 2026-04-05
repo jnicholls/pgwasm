@@ -42,3 +42,6 @@ wat.workspace = true
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 pg_wasm_macos_test_stub = { path = "../pg_wasm_macos_test_stub" }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+pg_wasm_macos_test_stub = { path = "../pg_wasm_macos_test_stub" }
