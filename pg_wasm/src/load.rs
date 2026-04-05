@@ -41,7 +41,11 @@ fn drop_track_b_types_for_module(types: &[(String, String)]) {
     }
 }
 
-fn cleanup_failed_load(id: ModuleId, oids: &[pgrx::pg_sys::Oid], backend: crate::runtime::ModuleExecutionBackend) {
+fn cleanup_failed_load(
+    id: ModuleId,
+    oids: &[pgrx::pg_sys::Oid],
+    backend: crate::runtime::ModuleExecutionBackend,
+) {
     for o in oids {
         proc_reg::drop_wasm_trampoline_proc(*o);
     }
@@ -116,9 +120,11 @@ pub fn load_from_bytes(
         && backend == ModuleExecutionBackend::Wasmtime
         && crate::guc::auto_create_component_types()
     {
-        if let Err(e) =
-            crate::track_b_component_types::rewrite_signatures_with_auto_composites(id, &schema, &mut exports)
-        {
+        if let Err(e) = crate::track_b_component_types::rewrite_signatures_with_auto_composites(
+            id,
+            &schema,
+            &mut exports,
+        ) {
             cleanup_failed_load(id, &[], backend);
             return Err(LoadError::Message(e));
         }
@@ -253,9 +259,7 @@ pub fn reconfigure_module(module_id: i64, options: Option<JsonB>) -> Result<(), 
 /// Map a wasm export name (may contain `-`) to a suffix safe for unquoted PostgreSQL identifiers.
 fn sql_identifier_suffix_for_export(export_name: &str) -> Result<String, LoadError> {
     if export_name.is_empty() {
-        return Err(LoadError::Message(
-            "pg_wasm_load: empty export name".into(),
-        ));
+        return Err(LoadError::Message("pg_wasm_load: empty export name".into()));
     }
     if !export_name
         .chars()

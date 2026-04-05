@@ -57,7 +57,9 @@ fn wasm_types_for_hint(hint: &ExportTypeHint) -> Result<(Vec<ValType>, Vec<ValTy
             );
         }
         PgWasmTypeKind::Composite => {
-            return Err("pg_wasm: composite type hints apply to WebAssembly components only".into());
+            return Err(
+                "pg_wasm: composite type hints apply to WebAssembly components only".into(),
+            );
         }
     }];
     Ok((params, results))
@@ -239,10 +241,7 @@ pub fn list_core_exports_from_wasm_bytes(
         let ft = type_defs
             .get(*type_idx as usize)
             .ok_or_else(|| format!("pg_wasm: invalid function type index {type_idx}"))?;
-        defined_sigs.push((
-            ft.params().to_vec(),
-            ft.results().to_vec(),
-        ));
+        defined_sigs.push((ft.params().to_vec(), ft.results().to_vec()));
     }
 
     let mut out = Vec::new();

@@ -19,8 +19,8 @@ fn composite_attributes_ordered(typoid: Oid) -> Result<Vec<(String, Oid)>, Strin
          WHERE a.attrelid = t.typrelid AND a.attnum > 0 AND NOT a.attisdropped",
         u32::from(typoid)
     );
-    let packed: Option<String> = Spi::get_one(&sql)
-        .map_err(|e| format!("pg_wasm: composite attribute query: {e}"))?;
+    let packed: Option<String> =
+        Spi::get_one(&sql).map_err(|e| format!("pg_wasm: composite attribute query: {e}"))?;
     let Some(packed) = packed else {
         return Ok(Vec::new());
     };
@@ -82,7 +82,10 @@ fn validate_nested_or_leaf(mt: &MarshalType, atttypid: Oid) -> Result<(), String
 }
 
 /// Ensure `typoid` is a composite type whose attributes match `mt` (`record` or `tuple` only).
-pub fn validate_composite_typoid_matches_marshal(typoid: Oid, mt: &MarshalType) -> Result<(), String> {
+pub fn validate_composite_typoid_matches_marshal(
+    typoid: Oid,
+    mt: &MarshalType,
+) -> Result<(), String> {
     if !pg_type_oid_is_composite(typoid)? {
         return Err(format!(
             "pg_wasm: oid {} is not a composite type",
@@ -122,8 +125,8 @@ pub fn validate_composite_typoid_matches_marshal(typoid: Oid, mt: &MarshalType) 
             }
             Ok(())
         }
-        _ => Err(
-            "pg_wasm: composite SQL encoding applies only to WIT record and tuple types".into(),
-        ),
+        _ => {
+            Err("pg_wasm: composite SQL encoding applies only to WIT record and tuple types".into())
+        }
     }
 }

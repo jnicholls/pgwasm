@@ -39,3 +39,6 @@ wat.workspace = true
 [dev-dependencies]
 pgrx-tests.workspace = true
 wat.workspace = true
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+pg_wasm_macos_test_stub = { path = "../pg_wasm_macos_test_stub" }

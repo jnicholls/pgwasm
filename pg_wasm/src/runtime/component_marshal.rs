@@ -54,8 +54,7 @@ pub fn args_to_vals(
             args.len()
         ));
     }
-    plan
-        .iter()
+    plan.iter()
         .zip(args)
         .map(|(m, a)| prepared_arg_to_val(a, m))
         .collect()
@@ -64,59 +63,69 @@ pub fn args_to_vals(
 fn prepared_arg_to_val(arg: &PreparedComponentArg, m: &MarshalType) -> Result<Val, String> {
     match (arg, m) {
         (PreparedComponentArg::Bool(v), MarshalType::Bool) => Ok(Val::Bool(*v)),
-        (PreparedComponentArg::I32(v), MarshalType::S8) => Ok(Val::S8((*v).try_into().map_err(|_| {
-            "pg_wasm: i32 out of range for WIT s8".to_string()
-        })?)),
-        (PreparedComponentArg::I32(v), MarshalType::U8) => Ok(Val::U8((*v).try_into().map_err(|_| {
-            "pg_wasm: i32 out of range for WIT u8".to_string()
-        })?)),
-        (PreparedComponentArg::I32(v), MarshalType::S16) => Ok(Val::S16((*v).try_into().map_err(
-            |_| "pg_wasm: i32 out of range for WIT s16".to_string(),
-        )?)),
-        (PreparedComponentArg::I32(v), MarshalType::U16) => Ok(Val::U16((*v).try_into().map_err(
-            |_| "pg_wasm: i32 out of range for WIT u16".to_string(),
-        )?)),
+        (PreparedComponentArg::I32(v), MarshalType::S8) => {
+            Ok(Val::S8((*v).try_into().map_err(|_| {
+                "pg_wasm: i32 out of range for WIT s8".to_string()
+            })?))
+        }
+        (PreparedComponentArg::I32(v), MarshalType::U8) => {
+            Ok(Val::U8((*v).try_into().map_err(|_| {
+                "pg_wasm: i32 out of range for WIT u8".to_string()
+            })?))
+        }
+        (PreparedComponentArg::I32(v), MarshalType::S16) => {
+            Ok(Val::S16((*v).try_into().map_err(|_| {
+                "pg_wasm: i32 out of range for WIT s16".to_string()
+            })?))
+        }
+        (PreparedComponentArg::I32(v), MarshalType::U16) => {
+            Ok(Val::U16((*v).try_into().map_err(|_| {
+                "pg_wasm: i32 out of range for WIT u16".to_string()
+            })?))
+        }
         (PreparedComponentArg::I32(v), MarshalType::S32) => Ok(Val::S32(*v)),
-        (PreparedComponentArg::I32(v), MarshalType::U32) => Ok(Val::U32((*v).try_into().map_err(
-            |_| "pg_wasm: negative i32 cannot be passed as WIT u32".to_string(),
-        )?)),
+        (PreparedComponentArg::I32(v), MarshalType::U32) => {
+            Ok(Val::U32((*v).try_into().map_err(|_| {
+                "pg_wasm: negative i32 cannot be passed as WIT u32".to_string()
+            })?))
+        }
         (PreparedComponentArg::I64(v), MarshalType::S64) => Ok(Val::S64(*v)),
-        (PreparedComponentArg::I64(v), MarshalType::U64) => Ok(Val::U64((*v).try_into().map_err(
-            |_| "pg_wasm: negative i64 cannot be passed as WIT u64".to_string(),
-        )?)),
+        (PreparedComponentArg::I64(v), MarshalType::U64) => {
+            Ok(Val::U64((*v).try_into().map_err(|_| {
+                "pg_wasm: negative i64 cannot be passed as WIT u64".to_string()
+            })?))
+        }
         (PreparedComponentArg::F32(v), MarshalType::F32) => Ok(Val::Float32(*v)),
         (PreparedComponentArg::F64(v), MarshalType::F64) => Ok(Val::Float64(*v)),
         (PreparedComponentArg::String(s), MarshalType::Char) => {
             let mut it = s.chars();
-            let ch = it.next().ok_or_else(|| "pg_wasm: empty text for WIT char".to_string())?;
+            let ch = it
+                .next()
+                .ok_or_else(|| "pg_wasm: empty text for WIT char".to_string())?;
             if it.next().is_some() {
                 return Err("pg_wasm: expected a single Unicode scalar for WIT char".into());
             }
             Ok(Val::Char(ch))
         }
         (PreparedComponentArg::String(s), MarshalType::String) => Ok(Val::String(s.clone())),
-        (PreparedComponentArg::Bytes(b), MarshalType::List(inner)) if matches!(inner.as_ref(), MarshalType::U8) => {
-            Ok(Val::List(
-                b.iter()
-                    .copied()
-                    .map(Val::U8)
-                    .collect(),
-            ))
+        (PreparedComponentArg::Bytes(b), MarshalType::List(inner))
+            if matches!(inner.as_ref(), MarshalType::U8) =>
+        {
+            Ok(Val::List(b.iter().copied().map(Val::U8).collect()))
         }
         (PreparedComponentArg::Int32Array(xs), MarshalType::List(inner))
             if matches!(inner.as_ref(), MarshalType::S32 | MarshalType::U32) =>
         {
-            let vals: Result<Vec<Val>, String> = xs
-                .iter()
-                .map(|x| match inner.as_ref() {
-                    MarshalType::S32 => Ok(Val::S32(*x)),
-                    MarshalType::U32 => Ok(Val::U32(
-                        (*x).try_into()
-                            .map_err(|_| "pg_wasm: negative array element for WIT u32".to_string())?,
-                    )),
-                    _ => unreachable!(),
-                })
-                .collect();
+            let vals: Result<Vec<Val>, String> =
+                xs.iter()
+                    .map(|x| match inner.as_ref() {
+                        MarshalType::S32 => Ok(Val::S32(*x)),
+                        MarshalType::U32 => Ok(Val::U32((*x).try_into().map_err(|_| {
+                            "pg_wasm: negative array element for WIT u32".to_string()
+                        })?)),
+                        _ => unreachable!(),
+                    })
+                    .collect();
             Ok(Val::List(vals?))
         }
         (PreparedComponentArg::StringArray(ss), MarshalType::List(inner))
@@ -124,9 +133,7 @@ fn prepared_arg_to_val(arg: &PreparedComponentArg, m: &MarshalType) -> Result<Va
         {
             Ok(Val::List(ss.iter().cloned().map(Val::String).collect()))
         }
-        (PreparedComponentArg::Json(j), _) if json_interchange_marshal(m) => {
-            json_to_val(j, m)
-        }
+        (PreparedComponentArg::Json(j), _) if json_interchange_marshal(m) => json_to_val(j, m),
         (PreparedComponentArg::WasmVal(v), _)
             if composite_layout::marshal_type_uses_composite_surface(m) =>
         {
@@ -156,7 +163,8 @@ pub fn val_to_return_payload(
     m: &MarshalType,
     ret: &PgWasmReturnDesc,
 ) -> Result<DynReturnPayload, String> {
-    if ret.kind == PgWasmTypeKind::Composite && composite_layout::marshal_type_uses_composite_surface(m)
+    if ret.kind == PgWasmTypeKind::Composite
+        && composite_layout::marshal_type_uses_composite_surface(m)
     {
         let d = crate::runtime::composite_marshal::val_to_composite_datum(&v, ret.pg_oid, m)?;
         return Ok(DynReturnPayload::Datum(d));
@@ -171,18 +179,24 @@ pub fn val_to_return_payload(
         (Val::S16(v), MarshalType::S16) => Ok(DynReturnPayload::I32(i32::from(v))),
         (Val::U16(v), MarshalType::U16) => Ok(DynReturnPayload::I32(i32::from(v))),
         (Val::S32(v), MarshalType::S32) => Ok(DynReturnPayload::I32(v)),
-        (Val::U32(v), MarshalType::U32) => Ok(DynReturnPayload::I32(v.try_into().map_err(|_| {
-            "pg_wasm: u32 result does not fit int4".to_string()
-        })?)),
+        (Val::U32(v), MarshalType::U32) => {
+            Ok(DynReturnPayload::I32(v.try_into().map_err(|_| {
+                "pg_wasm: u32 result does not fit int4".to_string()
+            })?))
+        }
         (Val::S64(v), MarshalType::S64) => Ok(DynReturnPayload::I64(v)),
-        (Val::U64(v), MarshalType::U64) => Ok(DynReturnPayload::I64(v.try_into().map_err(|_| {
-            "pg_wasm: u64 result does not fit int8".to_string()
-        })?)),
+        (Val::U64(v), MarshalType::U64) => {
+            Ok(DynReturnPayload::I64(v.try_into().map_err(|_| {
+                "pg_wasm: u64 result does not fit int8".to_string()
+            })?))
+        }
         (Val::Float32(v), MarshalType::F32) => Ok(DynReturnPayload::F32(v)),
         (Val::Float64(v), MarshalType::F64) => Ok(DynReturnPayload::F64(v)),
         (Val::Char(c), MarshalType::Char) => Ok(DynReturnPayload::String(c.to_string())),
         (Val::String(s), MarshalType::String) => Ok(DynReturnPayload::String(s)),
-        (Val::List(items), MarshalType::List(inner)) if matches!(inner.as_ref(), MarshalType::U8) => {
+        (Val::List(items), MarshalType::List(inner))
+            if matches!(inner.as_ref(), MarshalType::U8) =>
+        {
             let mut out = Vec::with_capacity(items.len());
             for it in items {
                 match it {
@@ -199,15 +213,19 @@ pub fn val_to_return_payload(
             for it in items {
                 match (inner.as_ref(), it) {
                     (MarshalType::S32, Val::S32(x)) => out.push(x),
-                    (MarshalType::U32, Val::U32(x)) => out.push(x.try_into().map_err(|_| {
-                        "pg_wasm: u32 list element does not fit int4".to_string()
-                    })?),
+                    (MarshalType::U32, Val::U32(x)) => {
+                        out.push(x.try_into().map_err(|_| {
+                            "pg_wasm: u32 list element does not fit int4".to_string()
+                        })?)
+                    }
                     _ => return Err("pg_wasm: integer list result has wrong element type".into()),
                 }
             }
             Ok(DynReturnPayload::Int32Array(out))
         }
-        (Val::List(items), MarshalType::List(inner)) if matches!(inner.as_ref(), MarshalType::String) => {
+        (Val::List(items), MarshalType::List(inner))
+            if matches!(inner.as_ref(), MarshalType::String) =>
+        {
             let mut out = Vec::with_capacity(items.len());
             for it in items {
                 match it {
@@ -304,14 +322,18 @@ fn json_to_val(j: &serde_json::Value, m: &MarshalType) -> Result<Val, String> {
                 }
                 let lifted = match ok.as_ref() {
                     None if okv.is_null() => None,
-                    None => return Err("pg_wasm: jsonb result ok branch is not a payload type".into()),
+                    None => {
+                        return Err("pg_wasm: jsonb result ok branch is not a payload type".into());
+                    }
                     Some(t) => Some(Box::new(json_to_val(okv, t)?)),
                 };
                 Val::Result(Ok(lifted))
             } else if let Some(errv) = obj.get("err") {
                 let lifted = match err.as_ref() {
                     None if errv.is_null() => None,
-                    None => return Err("pg_wasm: jsonb result err branch is not a payload type".into()),
+                    None => {
+                        return Err("pg_wasm: jsonb result err branch is not a payload type".into());
+                    }
                     Some(t) => Some(Box::new(json_to_val(errv, t)?)),
                 };
                 Val::Result(Err(lifted))
@@ -333,8 +355,9 @@ fn json_to_val(j: &serde_json::Value, m: &MarshalType) -> Result<Val, String> {
                 serde_json::Value::Array(items) => items
                     .iter()
                     .map(|x| {
-                        x.as_str()
-                            .ok_or_else(|| "pg_wasm: jsonb flags array must contain strings".to_string())
+                        x.as_str().ok_or_else(|| {
+                            "pg_wasm: jsonb flags array must contain strings".to_string()
+                        })
                     })
                     .collect::<Result<_, _>>()?,
                 _ => {
@@ -415,7 +438,9 @@ fn json_to_val(j: &serde_json::Value, m: &MarshalType) -> Result<Val, String> {
                 .as_str()
                 .ok_or_else(|| "pg_wasm: jsonb char expected JSON string".to_string())?;
             let mut it = s.chars();
-            let ch = it.next().ok_or_else(|| "pg_wasm: jsonb char string is empty".to_string())?;
+            let ch = it
+                .next()
+                .ok_or_else(|| "pg_wasm: jsonb char string is empty".to_string())?;
             if it.next().is_some() {
                 return Err("pg_wasm: jsonb char must be one Unicode scalar".into());
             }
@@ -479,7 +504,9 @@ fn val_to_json(v: &Val, m: &MarshalType) -> Result<serde_json::Value, String> {
                     obj.insert("val".to_string(), val_to_json(pv, inner)?);
                 }
                 (None, Some(_)) => {
-                    return Err(format!("pg_wasm: variant case {tag:?} should have no payload"));
+                    return Err(format!(
+                        "pg_wasm: variant case {tag:?} should have no payload"
+                    ));
                 }
                 (Some(_), None) => {
                     return Err(format!("pg_wasm: variant case {tag:?} missing payload"));
@@ -604,8 +631,14 @@ mod tests {
         assert_json_roundtrip(&MarshalType::U16, serde_json::json!(50000));
         assert_json_roundtrip(&MarshalType::S32, serde_json::json!(-1_000_000));
         assert_json_roundtrip(&MarshalType::U32, serde_json::json!(3_000_000_000u64));
-        assert_json_roundtrip(&MarshalType::S64, serde_json::json!(-9_223_372_036_854_775_808i64));
-        assert_json_roundtrip(&MarshalType::U64, serde_json::json!(18_446_744_073_709_551_615u64));
+        assert_json_roundtrip(
+            &MarshalType::S64,
+            serde_json::json!(-9_223_372_036_854_775_808i64),
+        );
+        assert_json_roundtrip(
+            &MarshalType::U64,
+            serde_json::json!(18_446_744_073_709_551_615u64),
+        );
         assert_json_roundtrip(&MarshalType::F32, serde_json::json!(1.5));
         assert_json_roundtrip(&MarshalType::F64, serde_json::json!(2.25));
         assert_json_roundtrip(&MarshalType::Char, serde_json::json!("π"));

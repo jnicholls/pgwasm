@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "pg_wasm",
+    "pg_wasm_macos_test_stub",
 ]
 
 [workspace.package]
@@ -10,6 +11,7 @@ edition = "2024"
 version = "0.1.0"
 
 [workspace.dependencies]
+cc = "1.2"
 anyhow = "1"
 extism = "1.21.0"
 serde_json = "1"

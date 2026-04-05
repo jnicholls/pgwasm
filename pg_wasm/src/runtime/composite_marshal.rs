@@ -14,7 +14,10 @@ use crate::mapping::MarshalType;
 /// # Safety
 ///
 /// `datum` must be a valid non-null composite datum for the expected type.
-pub unsafe fn composite_datum_to_val(datum: pg_sys::Datum, mt: &MarshalType) -> Result<Val, String> {
+pub unsafe fn composite_datum_to_val(
+    datum: pg_sys::Datum,
+    mt: &MarshalType,
+) -> Result<Val, String> {
     if !composite_layout::marshal_type_uses_composite_surface(mt) {
         return Err("pg_wasm: composite_datum_to_val expects record or tuple marshal type".into());
     }
@@ -134,9 +137,11 @@ fn read_scalar_named(
                 .ok_or_else(|| format!("pg_wasm: NULL int field {name:?}"))?;
             match mt {
                 MarshalType::S32 => Ok(Val::S32(v)),
-                MarshalType::U32 => Ok(Val::U32(v.try_into().map_err(|_| {
-                    "pg_wasm: negative int4 cannot be WIT u32".to_string()
-                })?)),
+                MarshalType::U32 => {
+                    Ok(Val::U32(v.try_into().map_err(|_| {
+                        "pg_wasm: negative int4 cannot be WIT u32".to_string()
+                    })?))
+                }
                 _ => unreachable!(),
             }
         }
@@ -147,9 +152,11 @@ fn read_scalar_named(
                 .ok_or_else(|| format!("pg_wasm: NULL bigint field {name:?}"))?;
             match mt {
                 MarshalType::S64 => Ok(Val::S64(v)),
-                MarshalType::U64 => Ok(Val::U64(v.try_into().map_err(|_| {
-                    "pg_wasm: negative int8 cannot be WIT u64".to_string()
-                })?)),
+                MarshalType::U64 => {
+                    Ok(Val::U64(v.try_into().map_err(|_| {
+                        "pg_wasm: negative int8 cannot be WIT u64".to_string()
+                    })?))
+                }
                 _ => unreachable!(),
             }
         }
@@ -253,9 +260,11 @@ fn read_scalar_indexed(
                 .ok_or_else(|| format!("pg_wasm: NULL int attribute {idx}"))?;
             match mt {
                 MarshalType::S32 => Ok(Val::S32(v)),
-                MarshalType::U32 => Ok(Val::U32(v.try_into().map_err(|_| {
-                    "pg_wasm: negative int4 cannot be WIT u32".to_string()
-                })?)),
+                MarshalType::U32 => {
+                    Ok(Val::U32(v.try_into().map_err(|_| {
+                        "pg_wasm: negative int4 cannot be WIT u32".to_string()
+                    })?))
+                }
                 _ => unreachable!(),
             }
         }
@@ -266,9 +275,11 @@ fn read_scalar_indexed(
                 .ok_or_else(|| format!("pg_wasm: NULL bigint attribute {idx}"))?;
             match mt {
                 MarshalType::S64 => Ok(Val::S64(v)),
-                MarshalType::U64 => Ok(Val::U64(v.try_into().map_err(|_| {
-                    "pg_wasm: negative int8 cannot be WIT u64".to_string()
-                })?)),
+                MarshalType::U64 => {
+                    Ok(Val::U64(v.try_into().map_err(|_| {
+                        "pg_wasm: negative int8 cannot be WIT u64".to_string()
+                    })?))
+                }
                 _ => unreachable!(),
             }
         }
@@ -316,7 +327,11 @@ fn read_scalar_indexed(
 }
 
 /// Encode `val` as a datum of composite type `typoid` (`record` / `tuple` shapes only).
-pub fn val_to_composite_datum(val: &Val, typoid: pg_sys::Oid, mt: &MarshalType) -> Result<pg_sys::Datum, String> {
+pub fn val_to_composite_datum(
+    val: &Val,
+    typoid: pg_sys::Oid,
+    mt: &MarshalType,
+) -> Result<pg_sys::Datum, String> {
     if !composite_layout::marshal_type_uses_composite_surface(mt) {
         return Err("pg_wasm: val_to_composite_datum expects record or tuple marshal type".into());
     }
@@ -398,14 +413,20 @@ fn write_indexed_field(
     write_scalar_indexed(tup, attno, mt, val)
 }
 
-fn field_typoid_named(tup: &PgHeapTuple<'_, AllocatedByRust>, name: &str) -> Result<pg_sys::Oid, String> {
+fn field_typoid_named(
+    tup: &PgHeapTuple<'_, AllocatedByRust>,
+    name: &str,
+) -> Result<pg_sys::Oid, String> {
     let (_, att) = tup
         .get_attribute_by_name(name)
         .ok_or_else(|| format!("pg_wasm: composite has no attribute {name:?}"))?;
     Ok(att.atttypid)
 }
 
-fn field_typoid_at(tup: &PgHeapTuple<'_, AllocatedByRust>, attno: NonZeroUsize) -> Result<pg_sys::Oid, String> {
+fn field_typoid_at(
+    tup: &PgHeapTuple<'_, AllocatedByRust>,
+    attno: NonZeroUsize,
+) -> Result<pg_sys::Oid, String> {
     let att = tup
         .get_attribute_by_index(attno)
         .ok_or_else(|| format!("pg_wasm: composite has no attribute {attno}"))?;

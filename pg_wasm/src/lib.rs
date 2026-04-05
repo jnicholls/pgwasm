@@ -3,8 +3,6 @@ use pgrx::{JsonB, prelude::*};
 mod abi;
 mod composite_layout;
 mod config;
-#[cfg(feature = "runtime-wasmtime")]
-mod track_b_component_types;
 mod guc;
 mod load;
 mod mapping;
@@ -12,15 +10,19 @@ mod metrics;
 mod proc_reg;
 mod registry;
 mod runtime;
+#[cfg(feature = "runtime-wasmtime")]
+mod track_b_component_types;
 mod trampoline;
 mod views;
+
+#[cfg(all(test, target_os = "macos"))]
+#[used]
+static PG_WASM_MACOS_TEST_STUB_LINK: fn() = pg_wasm_macos_test_stub::ensure_linked;
 
 ::pgrx::pg_module_magic!(name, version);
 
 #[cfg(not(any(feature = "runtime-wasmtime", feature = "runtime-extism")))]
-compile_error!(
-    "pg_wasm: enable at least one runtime feature: runtime-wasmtime or runtime-extism"
-);
+compile_error!("pg_wasm: enable at least one runtime feature: runtime-wasmtime or runtime-extism");
 
 #[pg_guard]
 pub extern "C-unwind" fn _PG_init() {
@@ -574,9 +576,8 @@ mod tests {
             env!("OUT_DIR"),
             "/marshal_matrix.component.wasm"
         )));
-        let load_sql = format!(
-            "SELECT {ext_nsp}.pg_wasm_load(decode('{hex}','hex')::bytea, 'mmtb'::text)",
-        );
+        let load_sql =
+            format!("SELECT {ext_nsp}.pg_wasm_load(decode('{hex}','hex')::bytea, 'mmtb'::text)",);
         let mid = Spi::get_one::<i64>(&load_sql)
             .expect("load track b")
             .expect("mid");
@@ -588,7 +589,10 @@ mod tests {
         ))
         .expect("count types")
         .expect("cnt");
-        assert!(cnt_before >= 1, "expected auto-generated composite types, got {cnt_before}");
+        assert!(
+            cnt_before >= 1,
+            "expected auto-generated composite types, got {cnt_before}"
+        );
 
         let fq: String = Spi::get_one(&format!(
             "SELECT (quote_ident(n.nspname) || '.' || quote_ident(t.typname))::text \

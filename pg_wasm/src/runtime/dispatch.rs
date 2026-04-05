@@ -62,7 +62,9 @@ pub fn call_mem_in_out(
 ) -> Result<Vec<u8>, String> {
     match backend {
         #[cfg(feature = "runtime-wasmtime")]
-        ModuleExecutionBackend::Wasmtime => wasmtime_backend::call_mem_in_out(module, export, input),
+        ModuleExecutionBackend::Wasmtime => {
+            wasmtime_backend::call_mem_in_out(module, export, input)
+        }
         #[cfg(feature = "runtime-extism")]
         ModuleExecutionBackend::Extism => extism_backend::call_mem_in_out(module, export, input),
     }
@@ -137,7 +139,9 @@ pub fn call_bool_result_arity1(
             wasmtime_backend::call_bool_result_arity1(module, export, a)
         }
         #[cfg(feature = "runtime-extism")]
-        ModuleExecutionBackend::Extism => extism_backend::call_bool_result_arity1(module, export, a),
+        ModuleExecutionBackend::Extism => {
+            extism_backend::call_bool_result_arity1(module, export, a)
+        }
     }
 }
 
@@ -283,8 +287,8 @@ pub fn call_component_export_dynamic(
             wasmtime_backend::call_component_export_dynamic(module, export, params)
         }
         #[cfg(feature = "runtime-extism")]
-        ModuleExecutionBackend::Extism => Err(
-            "pg_wasm: dynamic component calls are not available on the Extism backend".into(),
-        ),
+        ModuleExecutionBackend::Extism => {
+            Err("pg_wasm: dynamic component calls are not available on the Extism backend".into())
+        }
     }
 }

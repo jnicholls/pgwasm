@@ -3,9 +3,9 @@
 //! PostgreSQL `prosrc` must be [`TRAMPOLINE_PG_SYMBOL`] (not the `…_wrapper` suffix used by
 //! `#[pg_extern]`), with a matching `pg_finfo_*` entry for the v1 call convention.
 
-use pgrx::{JsonB, fcinfo::pg_getarg, pg_sys, prelude::*};
 #[cfg(feature = "runtime-wasmtime")]
 use pgrx::fcinfo::pg_getarg_datum;
+use pgrx::{JsonB, fcinfo::pg_getarg, pg_sys, prelude::*};
 
 use crate::mapping::{ExportSignature, PgWasmReturnDesc, PgWasmTypeKind};
 
@@ -155,14 +155,14 @@ fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
 }
 
 fn run_wasm_isolated(p: &PreparedWasmCall) -> Result<WasmValue, String> {
+    #[cfg(feature = "runtime-wasmtime")]
+    use crate::runtime::dispatch::call_component_export_dynamic;
     use crate::runtime::dispatch::{
         call_bool_result_arity0, call_bool_result_arity1, call_bool_result_arity2, call_f32_arity0,
         call_f32_arity1, call_f32_arity2, call_f64_arity0, call_f64_arity1, call_f64_arity2,
         call_i32_arity0, call_i32_arity1, call_i32_arity2, call_i64_arity0, call_i64_arity1,
         call_mem_in_out,
     };
-    #[cfg(feature = "runtime-wasmtime")]
-    use crate::runtime::dispatch::call_component_export_dynamic;
     let mid = p.reg.module_id;
     let ex = p.reg.export_name.as_str();
     let backend = crate::registry::module_execution_backend(mid).ok_or_else(|| {
@@ -182,9 +182,9 @@ fn run_wasm_isolated(p: &PreparedWasmCall) -> Result<WasmValue, String> {
                 .expect("component_dynamic_plan");
             let vals = args_to_vals(&plan.params, prepared)?;
             let mut out = call_component_export_dynamic(backend, mid, ex, &vals)?;
-            let ret_val = out.pop().ok_or_else(|| {
-                "pg_wasm: component function returned no values".to_string()
-            })?;
+            let ret_val = out
+                .pop()
+                .ok_or_else(|| "pg_wasm: component function returned no values".to_string())?;
             dyn_payload_to_wasm_value(
                 val_to_return_payload(ret_val, &plan.result, &p.reg.signature.ret)?,
                 &p.reg.signature.ret,
@@ -194,9 +194,7 @@ fn run_wasm_isolated(p: &PreparedWasmCall) -> Result<WasmValue, String> {
             call_mem_in_out(backend, mid, ex, buf).map(WasmValue::Bytes)
         }
         WasmInvocation::I32Arity0 => call_i32_arity0(backend, mid, ex).map(WasmValue::I32),
-        WasmInvocation::I32Arity1(a) => {
-            call_i32_arity1(backend, mid, ex, *a).map(WasmValue::I32)
-        }
+        WasmInvocation::I32Arity1(a) => call_i32_arity1(backend, mid, ex, *a).map(WasmValue::I32),
         WasmInvocation::I32Arity2(a, b) => {
             call_i32_arity2(backend, mid, ex, *a, *b).map(WasmValue::I32)
         }
@@ -210,20 +208,14 @@ fn run_wasm_isolated(p: &PreparedWasmCall) -> Result<WasmValue, String> {
             call_bool_result_arity2(backend, mid, ex, *a, *b).map(WasmValue::Bool)
         }
         WasmInvocation::I64Arity0 => call_i64_arity0(backend, mid, ex).map(WasmValue::I64),
-        WasmInvocation::I64Arity1(a) => {
-            call_i64_arity1(backend, mid, ex, *a).map(WasmValue::I64)
-        }
+        WasmInvocation::I64Arity1(a) => call_i64_arity1(backend, mid, ex, *a).map(WasmValue::I64),
         WasmInvocation::F32Arity0 => call_f32_arity0(backend, mid, ex).map(WasmValue::F32),
-        WasmInvocation::F32Arity1(a) => {
-            call_f32_arity1(backend, mid, ex, *a).map(WasmValue::F32)
-        }
+        WasmInvocation::F32Arity1(a) => call_f32_arity1(backend, mid, ex, *a).map(WasmValue::F32),
         WasmInvocation::F32Arity2(a, b) => {
             call_f32_arity2(backend, mid, ex, *a, *b).map(WasmValue::F32)
         }
         WasmInvocation::F64Arity0 => call_f64_arity0(backend, mid, ex).map(WasmValue::F64),
-        WasmInvocation::F64Arity1(a) => {
-            call_f64_arity1(backend, mid, ex, *a).map(WasmValue::F64)
-        }
+        WasmInvocation::F64Arity1(a) => call_f64_arity1(backend, mid, ex, *a).map(WasmValue::F64),
         WasmInvocation::F64Arity2(a, b) => {
             call_f64_arity2(backend, mid, ex, *a, *b).map(WasmValue::F64)
         }
@@ -501,9 +493,11 @@ fn read_one_component_dynamic_arg(
                 .expect("pg_wasm: NULL or invalid text[] argument"),
         ),
         PgWasmTypeKind::Composite => {
-            let d = unsafe { pg_getarg_datum(fcinfo, i) }.expect("pg_wasm: NULL composite argument");
-            let v = unsafe { crate::runtime::composite_marshal::composite_datum_to_val(d, marshal) }
-                .unwrap_or_else(|e| error!("{e}"));
+            let d =
+                unsafe { pg_getarg_datum(fcinfo, i) }.expect("pg_wasm: NULL composite argument");
+            let v =
+                unsafe { crate::runtime::composite_marshal::composite_datum_to_val(d, marshal) }
+                    .unwrap_or_else(|e| error!("{e}"));
             PreparedComponentArg::WasmVal(v)
         }
     }

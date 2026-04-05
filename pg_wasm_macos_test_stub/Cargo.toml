@@ -1,0 +1,13 @@
+[package]
+name = "pg_wasm_macos_test_stub"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+links = "pg_wasm_macos_test_stub"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[build-dependencies]
+cc.workspace = true

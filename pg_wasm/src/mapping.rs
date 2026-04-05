@@ -180,10 +180,9 @@ fn parse_one_sql_type(v: &Value) -> Result<(Oid, PgWasmTypeKind), String> {
         return match kind {
             "jsonb" => Ok((pg_sys::JSONBOID, PgWasmTypeKind::Bytes)),
             "composite" => {
-                let t = obj
-                    .get("type")
-                    .and_then(|x| x.as_str())
-                    .ok_or_else(|| "composite type object requires string \"type\" (regtype)".to_string())?;
+                let t = obj.get("type").and_then(|x| x.as_str()).ok_or_else(|| {
+                    "composite type object requires string \"type\" (regtype)".to_string()
+                })?;
                 let oid = resolve_regtype_oid(t)?;
                 if !pg_type_oid_is_composite(oid)? {
                     return Err(format!("pg_wasm: {t:?} is not a composite type"));
@@ -322,11 +321,8 @@ fn marshal_type_non_primitive_fast(m: &MarshalType) -> bool {
 pub fn pg_descriptors_from_marshal_plan(
     plan: &ComponentDynCallPlan,
 ) -> Option<(Vec<PgWasmArgDesc>, PgWasmReturnDesc)> {
-    let args: Option<Vec<PgWasmArgDesc>> = plan
-        .params
-        .iter()
-        .map(marshal_type_to_arg_desc)
-        .collect();
+    let args: Option<Vec<PgWasmArgDesc>> =
+        plan.params.iter().map(marshal_type_to_arg_desc).collect();
     let args = args?;
     let ret = marshal_type_to_return_desc(&plan.result)?;
     Some((args, ret))

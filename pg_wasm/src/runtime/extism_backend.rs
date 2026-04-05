@@ -23,9 +23,11 @@ struct ExtismBackendState {
 }
 
 fn mutex() -> &'static Mutex<ExtismBackendState> {
-    INSTANCE.get_or_init(|| Mutex::new(ExtismBackendState {
-        artifacts: HashMap::new(),
-    }))
+    INSTANCE.get_or_init(|| {
+        Mutex::new(ExtismBackendState {
+            artifacts: HashMap::new(),
+        })
+    })
 }
 
 fn get_compiled(id: ModuleId) -> Result<Arc<CompiledPlugin>, String> {
@@ -97,9 +99,7 @@ pub fn compile_store_and_list_exports(
 ) -> Result<(Vec<(String, ExportSignature)>, bool), String> {
     match abi {
         WasmAbiKind::ComponentModel => {
-            return Err(
-                "pg_wasm: Extism backend does not load WebAssembly components".into(),
-            );
+            return Err("pg_wasm: Extism backend does not load WebAssembly components".into());
         }
         WasmAbiKind::CoreWasm | WasmAbiKind::Extism => {}
     }
@@ -111,7 +111,8 @@ pub fn compile_store_and_list_exports(
     if fuel != u64::MAX {
         builder = builder.with_fuel_limit(fuel);
     }
-    let compiled = CompiledPlugin::new(builder).map_err(|e| format!("pg_wasm: extism compile: {e}"))?;
+    let compiled =
+        CompiledPlugin::new(builder).map_err(|e| format!("pg_wasm: extism compile: {e}"))?;
     let mut g = mutex().lock().map_err(|e| e.to_string())?;
     g.artifacts.insert(id, Arc::new(compiled));
     Ok((exports, needs_wasi))

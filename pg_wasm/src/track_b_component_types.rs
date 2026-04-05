@@ -8,7 +8,8 @@ use pgrx::spi::Spi;
 
 use crate::composite_layout;
 use crate::mapping::{
-    ExportSignature, MarshalType, PgWasmArgDesc, PgWasmReturnDesc, PgWasmTypeKind, resolve_regtype_oid,
+    ExportSignature, MarshalType, PgWasmArgDesc, PgWasmReturnDesc, PgWasmTypeKind,
+    resolve_regtype_oid,
 };
 use crate::proc_reg;
 use crate::registry::ModuleId;
@@ -109,7 +110,8 @@ fn ensure_composite_type(
         }
         _ => {
             return Err(
-                "pg_wasm: internal error: ensure_composite_type on non-aggregate marshal type".into(),
+                "pg_wasm: internal error: ensure_composite_type on non-aggregate marshal type"
+                    .into(),
             );
         }
     };

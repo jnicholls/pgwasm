@@ -321,8 +321,7 @@ pub fn call_component_export_dynamic(
             let func = instance
                 .get_func(&mut store, export)
                 .ok_or_else(|| format!("pg_wasm: component has no function export {export:?}"))?;
-            func
-                .call(&mut store, params, &mut results)
+            func.call(&mut store, params, &mut results)
                 .map_err(wasmtime_to_host_string)?;
             Ok(results)
         }
@@ -333,8 +332,7 @@ pub fn call_component_export_dynamic(
             let func = instance
                 .get_func(&mut store, export)
                 .ok_or_else(|| format!("pg_wasm: component has no function export {export:?}"))?;
-            func
-                .call(&mut store, params, &mut results)
+            func.call(&mut store, params, &mut results)
                 .map_err(wasmtime_to_host_string)?;
             Ok(results)
         }
@@ -620,7 +618,9 @@ fn wasm_types_for_hint(hint: &ExportTypeHint) -> Result<(Vec<ValType>, Vec<ValTy
             );
         }
         PgWasmTypeKind::Composite => {
-            return Err("pg_wasm: composite type hints apply to WebAssembly components only".into());
+            return Err(
+                "pg_wasm: composite type hints apply to WebAssembly components only".into(),
+            );
         }
     }];
     Ok((params, results))
@@ -1537,7 +1537,10 @@ mod component_export_tests {
             WasmAbiKind::ComponentModel,
         )
         .expect("compile component fixture");
-        let (_, sig) = exports.iter().find(|(n, _)| n == "add").expect("add export");
+        let (_, sig) = exports
+            .iter()
+            .find(|(n, _)| n == "add")
+            .expect("add export");
         assert!(sig.component_dynamic_plan.is_none());
         remove_compiled_module(mid);
     }
@@ -1589,8 +1592,7 @@ mod component_export_tests {
             ("x".into(), Val::S32(5)),
             ("y".into(), Val::S32(6)),
         ])];
-        let out =
-            call_component_export_dynamic(mid, "echo-point", &params).expect("echo-point");
+        let out = call_component_export_dynamic(mid, "echo-point", &params).expect("echo-point");
         assert_eq!(out.len(), 1);
         let Val::Record(fields) = &out[0] else {
             panic!("expected record, got {:?}", out[0]);
@@ -1601,10 +1603,11 @@ mod component_export_tests {
         assert!(matches!(fields[0].1, Val::S32(5)));
         assert!(matches!(fields[1].1, Val::S32(6)));
 
-        let tout = call_component_export_dynamic(mid, "echo-tuple", &[Val::Tuple(vec![
-            Val::S32(7),
-            Val::S32(8),
-        ])])
+        let tout = call_component_export_dynamic(
+            mid,
+            "echo-tuple",
+            &[Val::Tuple(vec![Val::S32(7), Val::S32(8)])],
+        )
         .expect("echo-tuple");
         assert_eq!(tout.len(), 1);
         let Val::Tuple(items) = &tout[0] else {

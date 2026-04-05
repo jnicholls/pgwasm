@@ -3,8 +3,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        Arc,
-        Mutex, OnceLock,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicI64, Ordering},
     },
 };
