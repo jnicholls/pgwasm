@@ -1,0 +1,45 @@
+---
+description: How to organize and run pg_wasm pgrx/Postgres tests (regress, integration, unit) without unresolved Postgres symbols in host test binaries
+globs: "{pg_wasm,tests}/**/*"
+alwaysApply: false
+---
+
+# pg_wasm testing (pgrx / Postgres)
+
+This workspace follows the same **three-layer** testing model as [ParadeDB](https://github.com/paradedb/paradedb): **pg regress**, **integration (client) tests**, and **unit tests**. See the overview in [CONTRIBUTING.md — Testing](https://github.com/paradedb/paradedb/blob/main/CONTRIBUTING.md#testing) and the per-layer READMEs: [pg_regress](https://github.com/paradedb/paradedb/blob/main/pg_search/tests/pg_regress/README.md), [integration `tests/`](https://github.com/paradedb/paradedb/blob/main/tests/README.md), and [extension README — Testing](https://github.com/paradedb/paradedb/blob/main/pg_search/README.md#testing).
+
+## Layout (mirror ParadeDB)
+
+| Layer | Location | Runner | Needs extension installed manually? |
+|-------|-----------|--------|-------------------------------------|
+| **pg regress** | `pg_wasm/tests/pg_regress/` (`sql/`, `expected/`, optional `common/`) | `cargo pgrx regress …` | No — pgrx manages it |
+| **Integration** | Top-level workspace crate `tests/` (add as `[workspace].members` when introduced) | `cargo test -p tests` | Yes — DB must have extension installed; tests connect as a **client** |
+| **Unit** | `pg_wasm/src/**/*.rs` | See below | `#[pg_test]`: no; pure `#[test]`: N/A |
+
+Keep regress **deterministic**: `ORDER BY`, stable fixtures, `EXPLAIN (COSTS OFF, TIMING OFF)` where plans are asserted, avoid wall-clock noise (see ParadeDB’s pg_regress README).
+
+## Critical: host `cargo test` binary vs Postgres
+
+A normal **`cargo test`** (or **`cargo pgrx test`**’s **host** side) builds a **regular Rust test executable**. It does **not** load the extension as Postgres does, so **any code path that calls Postgres/pgrx symbols that are only valid inside the backend** can fail to link or fail at load time with **unresolved symbols**.
+
+Follow these rules:
+
+1. **`#[pg_test]`** — Use only for tests that **must** run **inside** Postgres (pgrx SPI, catalogs, etc.). Run them with **`cargo pgrx test`** (not plain `cargo test` unless your project is explicitly set up so every test path is safe on the host).
+2. **Plain `#[test]` / `#[cfg(test)]` in `pg_wasm`** — Must be **pure Rust** (or only use APIs that resolve without loading `libpostgres`). **Do not** call `pgrx` entry points that assume a loaded backend in these tests.
+3. **Integration crate (`tests/`)** — Depend on a **PostgreSQL client** (e.g. `tokio-postgres`, `sqlx`, `postgres`) and optional HTTP/golden helpers. **Do not** depend on `pg_wasm` as a Rust library for SQL-level integration tests: the extension ships as **`cdylib`** and should be exercised via **`CREATE EXTENSION`** over the wire. **Do not** pull `pgrx` into the integration test binary unless you fully understand pgrx’s linking model and still avoid host-only unresolved symbols.
+4. **`pub mod pg_test` in `lib.rs`** — Keep the **`pgrx`-required** `pg_test` module **minimal** (setup hooks / `postgresql_conf_options`). Avoid doing heavy work there that touches unresolved symbols on the host.
+
+When adding a workspace `tests` package, mirror ParadeDB’s env pattern: set **`DATABASE_URL`** (and for pgrx-managed Postgres, typical port **`28800 + PG major version`**), then **`cargo pgrx install`** / **`cargo pgrx start`** before **`cargo test -p tests`** (see [tests/README.md](https://github.com/paradedb/paradedb/blob/main/tests/README.md)).
+
+## Commands (cheat sheet)
+
+- **Regress (all / one file):** from `pg_wasm/`, `cargo pgrx regress` or `cargo pgrx regress --auto -- <pgversion> <testname>` (see pgrx docs and existing `tests/pg_regress/` layout).
+- **In-Postgres unit tests:** `cargo pgrx test -p pg_wasm` (filter with `--` / test name as supported by your pgrx version).
+- **Host-only unit tests:** only if they obey rule (2) above.
+- **Integration:** `cargo test -p tests` with DB running, extension installed, **`DATABASE_URL`** set.
+
+## When to use which layer
+
+- **Golden / small SQL output** → pg_regress.
+- **Large, non-deterministic, or client/property-style checks** → integration `tests/` crate.
+- **Rust-only logic** or **pgrx behavior inside the backend** → unit tests (`#[test]` pure Rust vs `#[pg_test]`).
