@@ -5,6 +5,9 @@ use std::{
     sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, Ordering},
 };
 
+#[cfg(any(test, feature = "pg_test"))]
+use std::sync::OnceLock;
+
 use pgrx::{pg_guard, pg_sys};
 
 /// Fixed shared-memory module metrics slot count.
@@ -24,6 +27,8 @@ const SHMEM_STATE_NAME: &std::ffi::CStr = c"pg_wasm.SharedState";
 const CATALOG_LOCK_TRANCHE_NAME: &std::ffi::CStr = c"pg_wasm.CatalogLock";
 
 static SHARED_STATE: AtomicPtr<SharedState> = AtomicPtr::new(std::ptr::null_mut());
+#[cfg(any(test, feature = "pg_test"))]
+static TEST_FALLBACK_STATE: OnceLock<&'static SharedState> = OnceLock::new();
 
 #[cfg(any(feature = "pg15", feature = "pg16", feature = "pg17", feature = "pg18"))]
 static mut PREV_SHMEM_REQUEST_HOOK: pg_sys::shmem_request_hook_type = None;
@@ -459,12 +464,31 @@ where
 }
 
 fn shared_state_ref() -> Option<&'static SharedState> {
+    #[cfg(any(test, feature = "pg_test"))]
+    {
+        ensure_test_fallback_state();
+    }
+
     let ptr = SHARED_STATE.load(Ordering::Acquire);
     if ptr.is_null() {
         None
     } else {
         Some(unsafe { &*ptr })
     }
+}
+
+#[cfg(any(test, feature = "pg_test"))]
+fn ensure_test_fallback_state() {
+    if !SHARED_STATE.load(Ordering::Acquire).is_null() {
+        return;
+    }
+
+    let fallback = TEST_FALLBACK_STATE
+        .get_or_init(|| Box::leak(Box::new(SharedState::new(std::ptr::null_mut()))));
+    SHARED_STATE.store(
+        (*fallback as *const SharedState).cast_mut(),
+        Ordering::Release,
+    );
 }
 
 fn catalog_lock_ptr() -> Option<*mut pg_sys::LWLock> {
@@ -590,8 +614,8 @@ mod host_tests {
 }
 
 #[cfg(any(test, feature = "pg_test"))]
-#[pg_schema]
-mod pg_tests {
+#[pgrx::pg_schema]
+mod tests {
     use std::thread;
 
     use pgrx::prelude::*;
