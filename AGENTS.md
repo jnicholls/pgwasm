@@ -4,7 +4,7 @@ This file orients automated assistants and humans working in this repository.
 
 ## Rust coding standards
 
-Apply these rules to **all Rust sources** (`*.rs`) in this workspace.
+Apply these rules to **Rust sources** (`*.rs`) and **Cargo manifests** (`Cargo.toml`) in this workspace.
 
 ### Edition, language, and standard library
 
@@ -22,6 +22,24 @@ Apply these rules to **all Rust sources** (`*.rs`) in this workspace.
   2. **External crates** (dependencies from crates.io or git).
   3. **Project internals** (`crate::...`, `super::...`, `self::...`).
 - Inside each section, group imports by **top-level crate or module** and use **brace lists** `{}` when pulling multiple items from the same path.
+
+### `Cargo.toml` dependencies
+
+- Keep dependency **keys** in **strict alphabetical order** within each table you touch: `[dependencies]`, `[dev-dependencies]`, `[build-dependencies]`, `[workspace.dependencies]` (workspace roots), and target-specific tables such as `[target.'cfg(...)'.dependencies]` (sort **within that table only**).
+- Do not reorder unrelated keys or tables for their own sake; when adding or editing dependencies, preserve **alphabetical order** in the affected table.
+
+```toml
+# ✅ GOOD
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+# ❌ BAD (crate names not alphabetical)
+[dependencies]
+thiserror = "2"
+anyhow = "1"
+```
 
 ### `Option` and `Result` handling
 

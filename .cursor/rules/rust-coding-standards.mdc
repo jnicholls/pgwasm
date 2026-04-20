@@ -1,6 +1,8 @@
 ---
-description: Rust style, imports, derives, and error handling for this workspace
-globs: "**/*.rs"
+description: Rust style, imports, derives, error handling, and Cargo.toml dependency ordering for this workspace
+globs:
+  - "**/*.rs"
+  - "**/Cargo.toml"
 alwaysApply: false
 ---
 
@@ -35,6 +37,29 @@ use serde::Deserialize;
 use crate::foo::Bar;
 ```
 
+## `Cargo.toml` dependencies
+
+In every manifest, keep dependency **keys** in **strict alphabetical order** within each table you touch:
+
+- `[dependencies]`, `[dev-dependencies]`, `[build-dependencies]`
+- `[workspace.dependencies]` (workspace roots)
+- Target-specific tables such as `[target.'cfg(...)'.dependencies]` — sort **within that table only**
+
+Do not reorder unrelated keys or tables for their own sake; when adding or editing dependencies, preserve **alphabetical order** in the affected table.
+
+```toml
+# ✅ GOOD
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+# ❌ BAD (crate names not alphabetical)
+[dependencies]
+thiserror = "2"
+anyhow = "1"
+```
+
 ## Error handling
 
 - **Do not** use `unwrap()` on `Option` or `Result` outside **tests**; propagate, match, or use `?` / contextual helpers instead.
@@ -44,3 +69,4 @@ use crate::foo::Bar;
 
 - **Types**: avoid long paths like `crate::a::b::MyType`; `use` the type at module scope and refer to `MyType`.
 - **Functions / consts**: avoid deep paths like `crate::a::b::f()`; `use` the containing module (e.g. `use crate::a::b;`) and call `b::f()` so call sites stay **at most two segments** after the import (e.g. `module::item`).
+
