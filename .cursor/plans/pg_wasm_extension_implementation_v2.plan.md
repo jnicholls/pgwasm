@@ -45,7 +45,7 @@ todos:
       bytes to Wasmtime. Honor `options.abi` only to force `core` parsing;
       reject unknown encodings with `PgWasmError::ValidationFailed`. Add
       host-only unit tests with hand-crafted binaries.
-    status: pending
+    status: completed
   - id: engine-and-epoch-ticker
     content: |
       Implement `runtime::engine::shared_engine()` returning a lazily-initialized
