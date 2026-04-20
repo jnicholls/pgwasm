@@ -66,7 +66,7 @@ todos:
     status: pending
   - id: proc-reg-ddl
     content: Implement `proc_reg::{register, unregister}` wrapping `ProcedureCreate` / `RemoveFunctionById` and `recordDependencyOn(DEPENDENCY_EXTENSION)`. Validate name collision handling per `options.replace_exports`.
-    status: pending
+    status: completed
   - id: core-module-scalar-path
     content: Implement `runtime::core` for core modules with scalar-only ABI (i32/i64/f32/f64/bool). Implement `mapping::scalars` and end-to-end load -> trampoline -> call on a fixture `add_i32.wat`. Verify via pg_regress golden output.
     status: pending
