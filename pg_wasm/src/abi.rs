@@ -22,14 +22,14 @@ pub(crate) fn detect(bytes: &[u8], override_: AbiOverride) -> Result<Abi, PgWasm
     for payload in Parser::new(0).parse_all(bytes) {
         match payload {
             Ok(Payload::Version { encoding, .. }) => {
-                let abi = match encoding {
-                    Encoding::Component => Abi::Component,
-                    Encoding::Module => Abi::Core,
-                    _ => {
-                        return Err(PgWasmError::ValidationFailed(format!(
-                            "unsupported wasm encoding: {encoding:?}"
-                        )))
-                    }
+                let abi = if encoding == Encoding::Component {
+                    Abi::Component
+                } else if encoding == Encoding::Module {
+                    Abi::Core
+                } else {
+                    return Err(PgWasmError::ValidationFailed(format!(
+                        "unsupported wasm encoding: {encoding:?}"
+                    )));
                 };
                 detected = Some(abi);
                 break;
@@ -55,7 +55,9 @@ pub(crate) fn detect(bytes: &[u8], override_: AbiOverride) -> Result<Abi, PgWasm
 }
 
 pub(crate) fn validate(bytes: &[u8]) -> Result<(), PgWasmError> {
-    wasmparser::validate(bytes).map_err(|err| PgWasmError::ValidationFailed(format!("{err:#}")))
+    wasmparser::validate(bytes)
+        .map(|_| ())
+        .map_err(|err| PgWasmError::ValidationFailed(format!("{err:#}")))
 }
 
 #[cfg(test)]
@@ -64,7 +66,7 @@ mod tests {
     use crate::errors::PgWasmError;
 
     const MINIMAL_CORE_MODULE: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
-    const MINIMAL_COMPONENT: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x0a, 0x00, 0x01, 0x00];
+    const MINIMAL_COMPONENT: &[u8] = &[0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
     const TRUNCATED_MAGIC: &[u8] = &[0x00, 0x61, 0x73, 0x6d];
     const INVALID_SECTION_LENGTH: &[u8] = &[
         0x00, 0x61, 0x73, 0x6d, // magic
