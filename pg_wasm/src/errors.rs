@@ -31,6 +31,8 @@ pub(crate) enum PgWasmError {
     Unsupported(String),
     #[error("internal pg_wasm error: {0}")]
     Internal(String),
+    #[error("validation failed: {0}")]
+    ValidationFailed(String),
 }
 
 #[allow(dead_code)]
@@ -47,6 +49,7 @@ impl PgWasmError {
             Self::Io(_) => PgSqlErrorCode::ERRCODE_IO_ERROR,
             Self::Unsupported(_) => PgSqlErrorCode::ERRCODE_FEATURE_NOT_SUPPORTED,
             Self::Internal(_) => PgSqlErrorCode::ERRCODE_INTERNAL_ERROR,
+            Self::ValidationFailed(_) => PgSqlErrorCode::ERRCODE_INVALID_BINARY_REPRESENTATION,
         }
     }
 }
