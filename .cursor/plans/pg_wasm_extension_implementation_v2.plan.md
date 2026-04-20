@@ -23,7 +23,7 @@ todos:
     status: completed
   - id: errors-and-guc
     content: Implement `errors::PgWasmError` with SQLSTATE mapping and define every `pg_wasm.*` GUC in `guc.rs` (enabled, allow_load_from_file, module_path, allowed_path_prefixes, max_module_bytes, max_modules, max_exports, allow_wasi, allow_wasi_{stdio,env,fs,net,http}, wasi_preopens, allowed_hosts, allow_spi, max_memory_pages, max_instances_total, instances_per_module, fuel_enabled, fuel_per_invocation, invocation_deadline_ms, epoch_tick_ms, collect_metrics, log_level, follow_symlinks). Register them in `_PG_init`.
-    status: pending
+    status: completed
   - id: catalog-schema
     content: Add `pg_wasm.modules`, `pg_wasm.exports`, `pg_wasm.wit_types`, `pg_wasm.dependencies` tables in versioned SQL. Implement `catalog::{modules,exports,wit_types}` CRUD via SPI. Set up `pg_wasm_loader` and `pg_wasm_reader` roles with minimal grants. Add `catalog::migrations` that validates shape on `_PG_init`.
     status: pending

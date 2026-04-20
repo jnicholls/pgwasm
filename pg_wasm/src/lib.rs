@@ -20,6 +20,12 @@ mod wit;
 
 ::pgrx::pg_module_magic!(name, version);
 
+#[allow(non_snake_case)]
+#[pg_guard]
+pub extern "C-unwind" fn _PG_init() {
+    guc::register_gucs();
+}
+
 #[pg_extern]
 fn hello_pg_wasm() -> &'static str {
     "Hello, pg_wasm"
@@ -34,7 +40,6 @@ mod tests {
     fn test_hello_pg_wasm() {
         assert_eq!("Hello, pg_wasm", crate::hello_pg_wasm());
     }
-
 }
 
 /// This module is required by `cargo pgrx test` invocations.
