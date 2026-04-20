@@ -26,7 +26,7 @@ todos:
     status: completed
   - id: catalog-schema
     content: Add `pg_wasm.modules`, `pg_wasm.exports`, `pg_wasm.wit_types`, `pg_wasm.dependencies` tables in versioned SQL. Implement `catalog::{modules,exports,wit_types}` CRUD via SPI. Set up `pg_wasm_loader` and `pg_wasm_reader` roles with minimal grants. Add `catalog::migrations` that validates shape on `_PG_init`.
-    status: completed
+    status: pending
   - id: shmem-and-generation
     content: Implement `shmem.rs` with a per-cluster segment sized by fixed compile-time constants (module slots and export slots). Provide `bump_generation(module_id)`, `read_generation()`, and atomic per-export counters. Protect mutators with `pg_wasm.CatalogLock` (LWLock). Wire into `shmem_request_hook` and `shmem_startup_hook`.
     status: pending
@@ -63,7 +63,7 @@ todos:
     status: pending
   - id: trampoline-stub
     content: Add `trampoline::pg_wasm_udf_trampoline` C entry point that resolves `fn_oid` through `registry::FN_OID_MAP`. Initially returns a constant; wire `registry` with a generation-aware cache that refreshes from catalog on miss.
-    status: pending
+    status: completed
   - id: proc-reg-ddl
     content: Implement `proc_reg::{register, unregister}` wrapping `ProcedureCreate` / `RemoveFunctionById` and `recordDependencyOn(DEPENDENCY_EXTENSION)`. Validate name collision handling per `options.replace_exports`.
     status: pending
