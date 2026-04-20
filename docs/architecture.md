@@ -668,6 +668,20 @@ type — we surface each as a distinct PG function via the usual overloading
 mechanism (`pg_proc.proargtypes` differ). Name conflicts inside one WIT
 world are rejected at load time.
 
+### 8.5 Operator and author references
+
+Two companion documents extract the operational surface of this design
+into flat reference tables:
+
+- [`docs/guc.md`](guc.md) — every `pg_wasm.*` GUC with its type, default,
+  `GucContext` scope, and hot/cold reconfiguration semantics. Use it as
+  the authoritative cheatsheet for `postgresql.conf` and
+  `ALTER SYSTEM SET` work.
+- [`docs/wit-mapping.md`](wit-mapping.md) — the canonical WIT →
+  PostgreSQL type table (this section, expanded) with a WIT fragment, the
+  DDL `pg_wasm.load` issues, and a sample `SELECT` for every primitive,
+  composite, generic, and resource kind.
+
 ---
 
 ## 9. Trampoline and invocation

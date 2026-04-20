@@ -174,7 +174,7 @@ todos:
     status: pending
   - id: docs-and-readme
     content: Update `README.md` with component-first usage. Write `docs/guc.md` (every GUC with default, scope, hot/cold reconfig), `docs/wit-mapping.md` (the full WIT -> PG table with examples). Reference them from `docs/architecture.md`.
-    status: pending
+    status: completed
   - id: build-features
     content: Set `default = ["pg13", "component-model"]`. Feature `core-only` builds without component model by gating `wit/`, `runtime/component`, `mapping/composite`, `mapping/list`. Confirm cargo check passes in both configurations and on `pg13..pg18`.
     status: pending
