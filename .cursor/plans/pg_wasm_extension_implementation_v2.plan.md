@@ -60,7 +60,7 @@ todos:
       `Engine::increment_epoch()` per tick, calling `EngineWeak::upgrade()`
       each tick so the thread exits naturally when the last `Engine` reference
       is dropped.
-    status: pending
+    status: completed
   - id: trampoline-stub
     content: Add `trampoline::pg_wasm_udf_trampoline` C entry point that resolves `fn_oid` through `registry::FN_OID_MAP`. Initially returns a constant; wire `registry` with a generation-aware cache that refreshes from catalog on miss.
     status: pending
