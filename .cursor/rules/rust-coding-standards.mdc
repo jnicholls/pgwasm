@@ -34,15 +34,32 @@ List proc-macro attributes in **alphabetical order**.
 ## `use` imports
 
 1. **Three blocks** separated by **one blank line**: `std` / `core` / `alloc` first, then **third-party crates**, then **`crate` / `super` / `self`** (internal).
-2. Within each block, group by **top-level crate or module** and use `{}` for multiple items from the same path.
+2. Within each block, group by **top-level crate or second-level std module** and use **brace lists** `{}` for multiple items from the same path.
+3. Inside each section, ensure listings are in strict alphabetical order. `cargo fmt` will enforce this.
 
+✅ GOOD
 ```rust
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::sync::{atomic::{AtomicU64, Ordering}, Arc};
 
 use anyhow::Context;
-use serde::Deserialize;
+use serde::{de::Deserialize, ser::Serialize};
 
-use crate::foo::Bar;
+use crate::{foo::{Bar, Baz}, fud::Dud};
+```
+
+❌ BAD
+```rust
+use anyhow::Context;
+use crate::foo::{Bar, Baz};
+use crate::fud::Dud;
+use serde::de::Deserialize;
+use serde::ser::Serialize;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 ```
 
 ## `Cargo.toml` dependencies

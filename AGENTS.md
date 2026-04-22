@@ -29,7 +29,33 @@ Prioritize symbol visibility in this order, from most restrictive to least restr
   1. **Standard library** (`std`, `core`, `alloc`, etc.).
   2. **External crates** (dependencies from crates.io or git).
   3. **Project internals** (`crate::...`, `super::...`, `self::...`).
-- Inside each section, group imports by **top-level crate or module** and use **brace lists** `{}` when pulling multiple items from the same path.
+- Inside each section, group imports by **top-level crate or second-level std module** and use **brace lists** `{}` when pulling multiple items from the same path.
+- Inside each section, ensure listings are in strict alphabetical order. `cargo fmt` will enforce this.
+
+✅ GOOD
+```rust
+use std::collections::{BTreeMap, HashMap};
+use std::fmt;
+use std::sync::{atomic::{AtomicU64, Ordering}, Arc};
+
+use anyhow::Context;
+use serde::{de::Deserialize, ser::Serialize};
+
+use crate::{foo::{Bar, Baz}, fud::Dud};
+```
+
+❌ BAD
+```rust
+use anyhow::Context;
+use crate::foo::{Bar, Baz};
+use crate::fud::Dud;
+use serde::de::Deserialize;
+use serde::ser::Serialize;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+```
 
 ### `Cargo.toml` dependencies
 
