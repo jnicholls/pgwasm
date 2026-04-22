@@ -91,7 +91,7 @@ When in doubt, match patterns already used in neighboring modules in this reposi
 
 - `cargo fmt --all` to ensure all code is formatted according to our rustfmt rules.
 - `cargo check --workspace` to ensure the whole workspace has valid syntax and type checks pass.
-- Ensure there are no compiler or lint warnings by addressing them accordingly.
+- `cargo clippy --workspace -- -D warnings` to check all lints and treat warnings as errors. Only #[allow(dead_code)] may be used on code that is intended to be used in future work. Otherwise, all warnings should be fixed, not allowed.
 
 ## Crate dependencies and API documentation
 
