@@ -90,10 +90,12 @@ anyhow = "1"
 - **Do not** use `unwrap()` on `Option` or `Result` outside **tests**; propagate, match, or use `?` / contextual helpers instead.
 - **Do not** use `expect()` when a **clearer** option exists (e.g. `?`, `map_err`, `context`, or an explicit branch).
 
-## Paths and imports
+## Import depth and symbol paths
 
-- **Types**: avoid long paths like `crate::a::b::MyType`; `use` the type at module scope and refer to `MyType`.
-- **Functions / consts**: avoid deep paths like `crate::a::b::f()`; `use` the containing module (e.g. `use crate::a::b;`) and call `b::f()` so call sites stay **at most two segments** after the import (e.g. `module::item`).
+- **Types**: do not spell out long paths at every use site (for example `crate::module1::module2::MyType`). Import `MyType` (or its parent module, per local style) at the top of the file or module.
+- **Functions and constants**: do not call through long paths like `crate::module1::module2::function()`. Import the **leaf module** you need (for example `use crate::module1::module2`) and call **`module2::function()`** so references stay shallow (typically **two path segments** after the import).
+
+When in doubt, match patterns already used in neighboring modules in this repository.
 
 ## Checks and actions to perform after iterating on code
 
