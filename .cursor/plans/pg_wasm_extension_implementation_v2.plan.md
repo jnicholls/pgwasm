@@ -63,7 +63,7 @@ todos:
     status: completed
   - id: trampoline-stub
     content: Add `trampoline::pg_wasm_udf_trampoline` C entry point that resolves `fn_oid` through `registry::FN_OID_MAP`. Initially returns a constant; wire `registry` with a generation-aware cache that refreshes from catalog on miss.
-    status: pending
+    status: completed
   - id: proc-reg-ddl
     content: Implement `proc_reg::{register, unregister}` wrapping `ProcedureCreate` / `RemoveFunctionById` and `recordDependencyOn(DEPENDENCY_EXTENSION)`. Validate name collision handling per `options.replace_exports`.
     status: completed
