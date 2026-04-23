@@ -26,7 +26,7 @@ todos:
     status: completed
   - id: catalog-schema
     content: Add `pg_wasm.modules`, `pg_wasm.exports`, `pg_wasm.wit_types`, `pg_wasm.dependencies` tables in versioned SQL. Implement `catalog::{modules,exports,wit_types}` CRUD via SPI. Set up `pg_wasm_loader` and `pg_wasm_reader` roles with minimal grants. Add `catalog::migrations` that validates shape on `_PG_init`.
-    status: pending
+    status: completed
   - id: shmem-and-generation
     content: Implement `shmem.rs` with a per-cluster segment sized by fixed compile-time constants (module slots and export slots). Provide `bump_generation(module_id)`, `read_generation()`, and atomic per-export counters. Protect mutators with `pg_wasm.CatalogLock` (LWLock). Wire into `shmem_request_hook` and `shmem_startup_hook`.
     status: pending
@@ -35,7 +35,7 @@ todos:
     status: completed
   - id: policy-resolve
     content: Define `config::{LoadOptions, PolicyOverrides, Limits}` and `policy::{EffectivePolicy, resolve}`. Enforce narrowing semantics (overrides can only deny/tighten). Cover with host-only unit tests for every combination.
-    status: pending
+    status: completed
   - id: abi-detect
     content: |
       Implement `abi::detect` using `wasmparser` 0.247 to classify bytes as
