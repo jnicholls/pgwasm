@@ -124,7 +124,7 @@ todos:
     status: pending
   - id: reconfigure-orchestration
     content: Implement `lifecycle::reconfigure` that updates `policy` / `limits` rows, calls `on-reconfigure` hook, and bumps generation. Confirm `StoreLimits` and epoch deadlines pick up the new values on next call via integration test.
-    status: pending
+    status: completed
   - id: host-interfaces
     content: Implement `pg_wasm:host/log` (maps to `ereport(NOTICE/INFO/WARNING)`) and `pg_wasm:host/query` (SPI read-only by default, gated by `pg_wasm.allow_spi`). Provide WIT text in `pg_wasm/wit/host.wit` and wire into the component `Linker`.
     status: pending

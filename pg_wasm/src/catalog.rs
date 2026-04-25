@@ -307,6 +307,24 @@ pub(crate) mod exports {
         get_one_by("fn_oid = $1", fn_oid.into())
     }
 
+    pub(crate) fn get_by_module_and_wasm_name(
+        module_id: i64,
+        wasm_name: &str,
+    ) -> Result<Option<ExportRow>> {
+        let sql = format!(
+            "SELECT {RETURNING_COLUMNS}
+             FROM {CATALOG_SCHEMA}.exports
+             WHERE module_id = $1 AND wasm_name = $2"
+        );
+
+        Spi::connect(|client| {
+            let args = vec![module_id.into(), wasm_name.into()];
+            maybe_first(client.select(sql.as_str(), Some(1), args.as_slice())?)
+                .and_then(|maybe_row| maybe_row.map(|row| export_from_row(&row)).transpose())
+        })
+        .map_err(|error| map_spi_error("reading export row by wasm name", error))
+    }
+
     pub(crate) fn list() -> Result<Vec<ExportRow>> {
         Spi::connect(|client| {
             let rows = client.select(
