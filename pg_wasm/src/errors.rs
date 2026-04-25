@@ -2,6 +2,7 @@
 
 use std::io;
 
+use pgrx::pg_sys::panic::ErrorReport;
 use pgrx::prelude::PgSqlErrorCode;
 use thiserror::Error;
 
@@ -34,6 +35,10 @@ pub(crate) enum PgWasmError {
 }
 
 impl PgWasmError {
+    pub(crate) fn into_error_report(self) -> ErrorReport {
+        ErrorReport::new(self.sqlstate(), self.to_string(), "pg_wasm")
+    }
+
     pub(crate) const fn sqlstate(&self) -> PgSqlErrorCode {
         match self {
             Self::Disabled => PgSqlErrorCode::ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE,
