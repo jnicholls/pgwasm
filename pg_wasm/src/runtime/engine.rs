@@ -5,7 +5,6 @@ use std::sync::OnceLock;
 use wasmtime::{Cache, Config, Engine};
 
 use crate::errors::PgWasmError;
-use crate::guc;
 
 static SHARED_ENGINE: OnceLock<Engine> = OnceLock::new();
 
@@ -20,7 +19,10 @@ pub(crate) fn try_shared_engine() -> Result<&'static Engine, PgWasmError> {
         return Ok(engine);
     }
 
-    let engine = build_engine(guc::FUEL_ENABLED.get())?;
+    // Fuel metering is enabled on the shared engine so per-invocation `Store::set_fuel` works when
+    // `pg_wasm.fuel_enabled` is toggled after process start. When fuel is effectively disabled for a
+    // call, the trampoline seeds the store with `u64::MAX` units so metering is a no-op in practice.
+    let engine = build_engine(true)?;
     let _ = SHARED_ENGINE.set(engine);
 
     SHARED_ENGINE.get().ok_or_else(|| {

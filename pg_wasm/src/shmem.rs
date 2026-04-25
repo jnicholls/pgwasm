@@ -327,17 +327,31 @@ pub(crate) fn incr_export_counter(
     export_index: u32,
     counter_kind: ExportCounterKind,
 ) {
+    add_export_counter(module_id, export_index, counter_kind, 1);
+}
+
+/// Add `delta` to a per-export counter lock-free (used for fuel-used metrics).
+pub(crate) fn add_export_counter(
+    module_id: u64,
+    export_index: u32,
+    counter_kind: ExportCounterKind,
+    delta: u64,
+) {
+    if delta == 0 {
+        return;
+    }
+
     if let Some(shared_state) = shared_state_ref() {
         if let Some(slot_index) = find_export_slot_index(shared_state, module_id, export_index) {
             shared_state.export_slots[slot_index]
                 .counter(counter_kind)
-                .fetch_add(1, Ordering::Relaxed);
+                .fetch_add(delta, Ordering::Relaxed);
         }
 
         if let Some(slot_index) = find_module_slot_index(shared_state, module_id) {
             shared_state.module_slots[slot_index]
                 .counter(counter_kind)
-                .fetch_add(1, Ordering::Relaxed);
+                .fetch_add(delta, Ordering::Relaxed);
         }
     }
 }

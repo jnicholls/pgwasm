@@ -4,7 +4,7 @@ use wasmtime::{
     Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc, Val,
 };
 
-use crate::errors::PgWasmError;
+use crate::errors::{PgWasmError, map_wasmtime_err};
 use crate::guc;
 use crate::policy::EffectivePolicy;
 
@@ -111,7 +111,7 @@ pub(crate) fn invoke_i32_n(
             )));
         }
     }
-    .map_err(|error| PgWasmError::Internal(format!("wasm trap or host error: {error}")))
+    .map_err(map_wasmtime_err)
 }
 
 fn fuel_units(policy: &EffectivePolicy) -> Option<u64> {

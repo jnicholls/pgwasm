@@ -43,6 +43,19 @@ pub(crate) struct PooledInstance {
 }
 
 impl PooledInstance {
+    /// Drop the pooled slot without returning it to the idle queue (for poisoned stores).
+    pub(crate) fn poison(mut self) {
+        if let Some(slot) = self.slot.take() {
+            self.pool.discard_slot(slot);
+        }
+    }
+
+    pub(crate) fn instance_and_store_mut(&mut self) -> Option<(&Instance, &mut Store<StoreCtx>)> {
+        self.slot
+            .as_mut()
+            .map(|slot| (&slot.instance, &mut slot.store))
+    }
+
     /// Return the slot to the pool.
     pub(crate) fn release(mut self) {
         if let Some(slot) = self.slot.take() {
@@ -60,6 +73,18 @@ impl Drop for PooledInstance {
 }
 
 impl PoolInner {
+    fn discard_slot(&self, slot: PooledSlot) {
+        drop(slot);
+        let mut guard = match self.state.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if guard.in_flight > 0 {
+            guard.in_flight -= 1;
+        }
+        self.cv.notify_all();
+    }
+
     fn return_slot(&self, slot: PooledSlot) {
         let mut guard = match self.state.lock() {
             Ok(g) => g,

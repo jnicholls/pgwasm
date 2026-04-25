@@ -46,6 +46,7 @@ impl GucSnapshot {
 
 #[cfg(test)]
 impl GucSnapshot {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_for_test(
         allow_wasi: bool,
         allow_wasi_stdio: bool,

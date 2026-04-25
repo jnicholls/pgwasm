@@ -5,8 +5,24 @@ use std::io;
 use pgrx::pg_sys::panic::ErrorReport;
 use pgrx::prelude::PgSqlErrorCode;
 use thiserror::Error;
+use wasmtime::Trap;
 
 pub(crate) type Result<T> = core::result::Result<T, PgWasmError>;
+
+pub(crate) fn map_wasmtime_err(e: wasmtime::Error) -> PgWasmError {
+    if let Some(trap) = e.downcast_ref::<Trap>() {
+        return match trap {
+            Trap::Interrupt => {
+                PgWasmError::Timeout("invocation interrupted by epoch deadline".to_string())
+            }
+            Trap::OutOfFuel => PgWasmError::ResourceLimitExceeded("fuel exhausted".to_string()),
+            other => PgWasmError::Trap {
+                kind: format!("{other}"),
+            },
+        };
+    }
+    PgWasmError::Internal(format!("{e:#}"))
+}
 
 #[derive(Debug, Error)]
 pub(crate) enum PgWasmError {
@@ -32,11 +48,21 @@ pub(crate) enum PgWasmError {
     Internal(String),
     #[error("validation failed: {0}")]
     ValidationFailed(String),
+    #[error("WebAssembly trap: {kind}")]
+    Trap { kind: String },
 }
 
 impl PgWasmError {
     pub(crate) fn into_error_report(self) -> ErrorReport {
-        ErrorReport::new(self.sqlstate(), self.to_string(), "pg_wasm")
+        match self {
+            Self::Trap { kind } => ErrorReport::new(
+                PgSqlErrorCode::ERRCODE_EXTERNAL_ROUTINE_EXCEPTION,
+                "WebAssembly trap".to_string(),
+                "pg_wasm",
+            )
+            .set_detail(kind),
+            other => ErrorReport::new(other.sqlstate(), other.to_string(), "pg_wasm"),
+        }
     }
 
     pub(crate) const fn sqlstate(&self) -> PgSqlErrorCode {
@@ -52,6 +78,7 @@ impl PgWasmError {
             Self::Unsupported(_) => PgSqlErrorCode::ERRCODE_FEATURE_NOT_SUPPORTED,
             Self::Internal(_) => PgSqlErrorCode::ERRCODE_INTERNAL_ERROR,
             Self::ValidationFailed(_) => PgSqlErrorCode::ERRCODE_INVALID_BINARY_REPRESENTATION,
+            Self::Trap { .. } => PgSqlErrorCode::ERRCODE_EXTERNAL_ROUTINE_EXCEPTION,
         }
     }
 }
