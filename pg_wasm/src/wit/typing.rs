@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use wit_parser::{Type, TypeDefKind, TypeOwner, WorldItem};
+use wit_parser::{Type, TypeDefKind, TypeOwner, WorldId, WorldItem};
 
 use super::world::DecodedWorld;
 use crate::errors::PgWasmError;
@@ -24,6 +24,8 @@ pub(crate) enum PgType {
     Domain {
         base: &'static str,
         check: Option<&'static str>,
+        /// When this domain represents WIT `flags`, bit order matches this list (index 0 = LSB).
+        flag_names: Option<Vec<String>>,
         name: Option<String>,
     },
     Array(Box<PgType>),
@@ -48,36 +50,17 @@ pub(crate) fn plan_types(
     module_prefix: &str,
     decoded: &DecodedWorld,
 ) -> Result<TypePlan, PgWasmError> {
-    let world = decoded
-        .resolve
-        .worlds
-        .get(decoded.world_id)
-        .ok_or_else(|| {
-            PgWasmError::InvalidModule("decoded world id was not present".to_string())
-        })?;
-
     let mut reachable = Vec::new();
     let mut seen = HashSet::new();
+    let mut visited_worlds = HashSet::new();
 
-    for item in world.imports.values().chain(world.exports.values()) {
-        match item {
-            WorldItem::Type { id, .. } => {
-                collect_type_ids(*id, &decoded.resolve, &mut seen, &mut reachable)?;
-            }
-            WorldItem::Interface { id, .. } => {
-                let interface = decoded.resolve.interfaces.get(*id).ok_or_else(|| {
-                    PgWasmError::InvalidModule(format!(
-                        "interface id {:?} was not present in resolve",
-                        id
-                    ))
-                })?;
-                for type_id in interface.types.values() {
-                    collect_type_ids(*type_id, &decoded.resolve, &mut seen, &mut reachable)?;
-                }
-            }
-            WorldItem::Function(_) => {}
-        }
-    }
+    collect_world_reachable_type_ids(
+        decoded.world_id,
+        &decoded.resolve,
+        &mut visited_worlds,
+        &mut seen,
+        &mut reachable,
+    )?;
 
     let mut visiting = HashSet::new();
     let mut planned = HashSet::new();
@@ -95,6 +78,51 @@ pub(crate) fn plan_types(
     }
 
     Ok(TypePlan { entries })
+}
+
+fn collect_world_reachable_type_ids(
+    world_id: WorldId,
+    resolve: &wit_parser::Resolve,
+    visited_worlds: &mut HashSet<WorldId>,
+    seen: &mut HashSet<wit_parser::TypeId>,
+    out: &mut Vec<wit_parser::TypeId>,
+) -> Result<(), PgWasmError> {
+    if !visited_worlds.insert(world_id) {
+        return Ok(());
+    }
+
+    let world = resolve.worlds.get(world_id).ok_or_else(|| {
+        PgWasmError::InvalidModule(format!(
+            "world id {:?} was not present in resolve",
+            world_id
+        ))
+    })?;
+
+    for include in &world.includes {
+        collect_world_reachable_type_ids(include.id, resolve, visited_worlds, seen, out)?;
+    }
+
+    for item in world.imports.values().chain(world.exports.values()) {
+        match item {
+            WorldItem::Type { id, .. } => {
+                collect_type_ids(*id, resolve, seen, out)?;
+            }
+            WorldItem::Interface { id, .. } => {
+                let interface = resolve.interfaces.get(*id).ok_or_else(|| {
+                    PgWasmError::InvalidModule(format!(
+                        "interface id {:?} was not present in resolve",
+                        id
+                    ))
+                })?;
+                for type_id in interface.types.values() {
+                    collect_type_ids(*type_id, resolve, seen, out)?;
+                }
+            }
+            WorldItem::Function(_) => {}
+        }
+    }
+
+    Ok(())
 }
 
 fn collect_type_ids(
@@ -203,7 +231,9 @@ fn plan_type_id(
     }
 
     if !visiting.insert(type_id) {
-        return Ok(());
+        return Err(PgWasmError::InvalidModule(format!(
+            "recursive or mutually recursive WIT type involving {type_id:?}"
+        )));
     }
 
     let typedef = resolve.types.get(type_id).ok_or_else(|| {
@@ -338,20 +368,29 @@ fn wit_to_pg(
         Type::S8 | Type::S16 => Ok(PgType::Scalar("int2")),
         Type::S32 => Ok(PgType::Scalar("int4")),
         Type::S64 => Ok(PgType::Scalar("int8")),
-        Type::U8 | Type::U16 => Ok(PgType::Domain {
+        Type::U8 => Ok(PgType::Domain {
             base: "int2",
             check: Some("VALUE >= 0"),
-            name: Some(format!("{module_prefix}_unsigned_small")),
+            flag_names: None,
+            name: Some(format!("{module_prefix}_u8")),
+        }),
+        Type::U16 => Ok(PgType::Domain {
+            base: "int2",
+            check: Some("VALUE >= 0"),
+            flag_names: None,
+            name: Some(format!("{module_prefix}_u16")),
         }),
         Type::U32 => Ok(PgType::Domain {
             base: "int8",
             check: Some("VALUE >= 0"),
-            name: Some(format!("{module_prefix}_unsigned_int")),
+            flag_names: None,
+            name: Some(format!("{module_prefix}_u32")),
         }),
         Type::U64 => Ok(PgType::Domain {
             base: "numeric",
             check: Some("VALUE >= 0 AND VALUE <= 18446744073709551615"),
-            name: Some(format!("{module_prefix}_unsigned_big")),
+            flag_names: None,
+            name: Some(format!("{module_prefix}_u64")),
         }),
         Type::F32 => Ok(PgType::Scalar("real")),
         Type::F64 => Ok(PgType::Scalar("double precision")),
@@ -388,13 +427,13 @@ fn map_typedef(
             Ok(PgType::Domain {
                 base: "int4",
                 check: None,
+                flag_names: Some(flag_names),
                 name: Some(format!(
                     "{}_flags_{}",
                     module_prefix,
                     sanitize_ident(&type_name(typedef, type_id))
                 )),
-            }
-            .with_documented_flags(flag_names))
+            })
         }
         TypeDefKind::Tuple(tuple) => {
             let mut fields = Vec::with_capacity(tuple.types.len());
@@ -453,6 +492,7 @@ fn map_typedef(
         | TypeDefKind::Stream(_) => Ok(PgType::Domain {
             base: "jsonb",
             check: None,
+            flag_names: None,
             name: Some(format!(
                 "{}_{}_json",
                 module_prefix,
@@ -464,18 +504,6 @@ fn map_typedef(
             "encountered unknown WIT type definition for {:?}",
             type_id
         ))),
-    }
-}
-
-impl PgType {
-    fn with_documented_flags(self, flag_names: Vec<String>) -> Self {
-        match self {
-            Self::Domain { base, check, name } => {
-                let _ = flag_names;
-                Self::Domain { base, check, name }
-            }
-            _ => self,
-        }
     }
 }
 
@@ -623,6 +651,79 @@ mod tests {
         assert_eq!(plan_a.entries[0].wit_name, "person");
         assert_eq!(plan_a.entries[1].wit_name, "color");
         assert_eq!(plan_a, plan_b);
+    }
+
+    #[test]
+    fn plan_snapshot_record_and_enum() {
+        let bytes = fixture_component_bytes(
+            r#"
+                package test:fixture;
+
+                interface api {
+                    record person {
+                        id: u32,
+                        name: string,
+                    }
+
+                    enum color {
+                        red,
+                        blue,
+                    }
+                }
+
+                world fixture {
+                    export api;
+                }
+            "#,
+            "fixture",
+        );
+        let decoded = world::decode(&bytes).expect("fixture should decode");
+        let plan = plan_types("demo", &decoded).expect("plan should build");
+
+        assert_eq!(
+            format!("{plan:?}"),
+            concat!(
+                "TypePlan { entries: [",
+                "TypePlanEntry { dependencies: [], pg_type: Composite([",
+                "CompositeField { name: \"id\", ty: Domain { base: \"int8\", check: Some(\"VALUE >= 0\"), flag_names: None, name: Some(\"demo_u32\") } }, ",
+                "CompositeField { name: \"name\", ty: Scalar(\"text\") }",
+                "]), type_key: \"test:fixture:api/person\", wit_name: \"person\" }, ",
+                "TypePlanEntry { dependencies: [], pg_type: Enum([\"red\", \"blue\"]), type_key: \"test:fixture:api/color\", wit_name: \"color\" }",
+                "] }"
+            )
+        );
+    }
+
+    #[test]
+    fn included_world_exports_contribute_types() {
+        let bytes = fixture_component_bytes(
+            r#"
+                package test:fixture;
+
+                interface inner-i {
+                    record inner-record {
+                        x: u32,
+                    }
+                }
+
+                world inner {
+                    export inner-i;
+                }
+
+                world outer {
+                    include inner;
+                }
+            "#,
+            "outer",
+        );
+        let decoded = world::decode(&bytes).expect("outer world should decode");
+        let plan = plan_types("demo", &decoded).expect("plan should include included types");
+        assert_eq!(plan.entries.len(), 1);
+        assert_eq!(plan.entries[0].wit_name, "inner-record");
+        assert_eq!(
+            plan.entries[0].type_key,
+            "test:fixture:inner-i/inner-record"
+        );
     }
 
     #[test]

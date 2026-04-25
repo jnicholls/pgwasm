@@ -151,4 +151,44 @@ mod tests {
         assert_eq!(decoded.wit_text, first);
         assert_eq!(first, second);
     }
+
+    #[test]
+    fn wit_printer_output_stable_after_parse_round_trip() {
+        let wit_source = r#"
+            package test:fixture;
+
+            interface api {
+                record person {
+                    id: u32,
+                    name: string,
+                }
+
+                enum color {
+                    red,
+                    blue,
+                }
+            }
+
+            world fixture {
+                export api;
+            }
+        "#;
+        let bytes = fixture_component_bytes(wit_source, "fixture").expect("fixture should encode");
+        let decoded = decode(&bytes).expect("component should decode");
+        let printed_once = decoded.wit_text.clone();
+
+        let mut resolve = Resolve::default();
+        resolve
+            .push_str("reparse.wit", &printed_once)
+            .expect("printed WIT should parse");
+        let (world_id, _) = resolve
+            .worlds
+            .iter()
+            .next()
+            .expect("re-parsed WIT should define at least one world");
+
+        let printed_twice =
+            print_wit_text(&resolve, world_id).expect("second pass through WitPrinter should work");
+        assert_eq!(printed_once, printed_twice);
+    }
 }

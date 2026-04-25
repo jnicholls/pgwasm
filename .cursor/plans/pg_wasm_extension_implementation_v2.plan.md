@@ -80,7 +80,7 @@ todos:
       enum, flags, resource/handle). Produce a stable plan keyed by module
       prefix. Normalize world output with `wit_component::WitPrinter` for
       storage in `pg_wasm.modules.wit_world`.
-    status: pending
+    status: completed
   - id: udt-registration
     content: Implement `wit::udt::register_type_plan` that issues `CREATE TYPE`, `CREATE DOMAIN`, `CREATE ENUM` DDL via SPI and records rows in `pg_wasm.wit_types` with `recordDependencyOn`. Idempotent for reload-compatible definitions; updates OIDs in-place when definitions match.
     status: pending
