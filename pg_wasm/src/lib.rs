@@ -47,6 +47,45 @@ mod tests {
     }
 }
 
+// TODO(wave-4): replace with lifecycle::load — temporary regress hook for core scalar path.
+// Registered in the extension schema (`wasm` per pg_wasm.control); SQL calls `wasm._core_invoke_scalar`.
+#[cfg(feature = "pg_test")]
+mod core_invoke_regress {
+    use pgrx::prelude::*;
+    use wasmtime::Val;
+
+    use crate::errors::PgWasmError;
+    use crate::mapping::scalars;
+    use crate::policy;
+    use crate::runtime::core as runtime_core;
+    use crate::runtime::engine;
+
+    #[pg_extern]
+    pub fn _core_invoke_scalar(bytes: &[u8], export: &str, i32args: Vec<i32>) -> i32 {
+        match invoke_inner(bytes, export, &i32args) {
+            Ok(v) => v,
+            Err(err) => {
+                ereport!(PgLogLevel::ERROR, err.sqlstate(), err.to_string());
+                unreachable!("ereport should not return");
+            }
+        }
+    }
+
+    fn invoke_inner(bytes: &[u8], export: &str, i32args: &[i32]) -> Result<i32, PgWasmError> {
+        let wasm_engine = engine::try_shared_engine()?;
+        let loaded = runtime_core::compile(wasm_engine, bytes)?;
+        let guc_snapshot = policy::GucSnapshot::from_gucs();
+        let effective = policy::resolve(&guc_snapshot, None, None)?;
+        let vals: Vec<Val> = scalars::i32_vec_to_vals(i32args);
+        match runtime_core::invoke(&loaded, export, &vals, &effective)? {
+            Val::I32(i) => Ok(i),
+            other => Err(PgWasmError::Internal(format!(
+                "core export returned non-i32 scalar: {other:?}"
+            ))),
+        }
+    }
+}
+
 /// This module is required by `cargo pgrx test` invocations.
 /// It must be visible at the root of your extension crate.
 #[cfg(test)]
