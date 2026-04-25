@@ -800,23 +800,23 @@ mod tests {
             );
         }
 
-        assert!(role_exists("pg_wasm_reader"));
-        assert!(role_exists("pg_wasm_loader"));
-        assert!(has_schema_privilege("pg_wasm_reader", "USAGE"));
-        assert!(has_schema_privilege("pg_wasm_loader", "USAGE"));
+        assert!(role_exists("wasm_reader"));
+        assert!(role_exists("wasm_loader"));
+        assert!(has_schema_privilege("wasm_reader", "USAGE"));
+        assert!(has_schema_privilege("wasm_loader", "USAGE"));
 
         for (table_name, _) in EXPECTED_TABLE_COLUMNS {
             let qualified_table_name = format!("{CATALOG_SCHEMA}.{table_name}");
             assert!(has_table_privilege(
-                "pg_wasm_reader",
+                "wasm_reader",
                 qualified_table_name.as_str(),
                 "SELECT"
             ));
 
             for privilege in ["SELECT", "INSERT", "UPDATE", "DELETE"] {
                 assert!(
-                    has_table_privilege("pg_wasm_loader", qualified_table_name.as_str(), privilege),
-                    "expected pg_wasm_loader to have {privilege} on {qualified_table_name}"
+                    has_table_privilege("wasm_loader", qualified_table_name.as_str(), privilege),
+                    "expected wasm_loader to have {privilege} on {qualified_table_name}"
                 );
             }
         }

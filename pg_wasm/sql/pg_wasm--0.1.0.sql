@@ -48,33 +48,33 @@ CREATE TABLE IF NOT EXISTS @extschema@.dependencies (
 
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'pg_wasm_loader') THEN
-        CREATE ROLE pg_wasm_loader NOLOGIN;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'wasm_loader') THEN
+        CREATE ROLE wasm_loader NOLOGIN;
     END IF;
 END
 $$;
 
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'pg_wasm_reader') THEN
-        CREATE ROLE pg_wasm_reader NOLOGIN;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'wasm_reader') THEN
+        CREATE ROLE wasm_reader NOLOGIN;
     END IF;
 END
 $$;
 
-GRANT USAGE ON SCHEMA @extschema@ TO pg_wasm_loader;
-GRANT USAGE ON SCHEMA @extschema@ TO pg_wasm_reader;
+GRANT USAGE ON SCHEMA @extschema@ TO wasm_loader;
+GRANT USAGE ON SCHEMA @extschema@ TO wasm_reader;
 
 GRANT SELECT ON TABLE
     @extschema@.dependencies,
     @extschema@.exports,
     @extschema@.modules,
     @extschema@.wit_types
-TO pg_wasm_reader;
+TO wasm_reader;
 
 GRANT DELETE, INSERT, SELECT, UPDATE ON TABLE
     @extschema@.dependencies,
     @extschema@.exports,
     @extschema@.modules,
     @extschema@.wit_types
-TO pg_wasm_loader;
+TO wasm_loader;
