@@ -9,6 +9,7 @@ use pgrx::pg_sys::{Datum, FunctionCallInfo, Oid};
 use crate::registry;
 
 #[pg_guard]
+#[unsafe(no_mangle)]
 pub unsafe extern "C-unwind" fn pg_wasm_udf_trampoline(fcinfo: FunctionCallInfo) -> Datum {
     let result = catch_unwind(AssertUnwindSafe(|| unsafe { trampoline_impl(fcinfo) }));
 
