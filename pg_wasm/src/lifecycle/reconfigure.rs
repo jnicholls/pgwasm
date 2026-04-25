@@ -136,7 +136,7 @@ fn merge_json_objects(
     Ok(Value::Object(out))
 }
 
-fn policy_overrides_from_value(value: &Value) -> Result<PolicyOverrides> {
+pub(crate) fn policy_overrides_from_value(value: &Value) -> Result<PolicyOverrides> {
     let Some(obj) = value.as_object() else {
         return Err(PgWasmError::InvalidConfiguration(
             "policy must be a JSON object".to_string(),
@@ -176,7 +176,7 @@ fn policy_overrides_from_value(value: &Value) -> Result<PolicyOverrides> {
     Ok(out)
 }
 
-fn limits_from_value(value: &Value) -> Result<Limits> {
+pub(crate) fn limits_from_value(value: &Value) -> Result<Limits> {
     let Some(obj) = value.as_object() else {
         return Err(PgWasmError::InvalidConfiguration(
             "limits must be a JSON object".to_string(),

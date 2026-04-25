@@ -145,7 +145,7 @@ todos:
     status: pending
   - id: metrics-and-views
     content: Implement `views::{modules, functions, stats, wit_types, policy_effective}` as SRF table functions backed by catalog rows and shmem atomics. Add grants so `pg_wasm_reader` can read `stats()`. Add regress tests asserting counter shape and monotonicity.
-    status: pending
+    status: completed
   - id: hooks
     content: Implement `hooks::{on_load, on_unload, on_reconfigure}` invocations with config blob passing. Hooks are optional component exports with stable names; absence is not an error. on-unload failures are logged, not fatal.
     status: pending

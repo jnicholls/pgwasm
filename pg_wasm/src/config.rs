@@ -2,8 +2,10 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
+
 /// Module ABI hint used by the SQL load/reconfigure JSON payload.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) enum Abi {
     #[default]
     Component,
@@ -11,7 +13,7 @@ pub(crate) enum Abi {
 }
 
 /// Per-module resource ceilings that can only tighten extension GUC limits.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) struct Limits {
     pub(crate) fuel_per_invocation: Option<i32>,
     pub(crate) instances_per_module: Option<i32>,
@@ -20,7 +22,7 @@ pub(crate) struct Limits {
 }
 
 /// Per-module capability overrides that can only narrow extension GUC policy.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(crate) struct PolicyOverrides {
     pub(crate) allow_spi: Option<bool>,
     pub(crate) allow_wasi: Option<bool>,
