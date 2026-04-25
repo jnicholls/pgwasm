@@ -1,5 +1,3 @@
-CREATE SCHEMA IF NOT EXISTS @extschema@;
-
 CREATE TABLE IF NOT EXISTS @extschema@.modules (
     module_id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
