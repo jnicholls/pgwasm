@@ -496,7 +496,7 @@ fn render_type_name(type_oid: pg_sys::Oid) -> String {
     }
 }
 
-#[cfg(any(test, feature = "pg_test"))]
+#[cfg(feature = "pg_test")]
 #[pgrx::pg_schema]
 mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};

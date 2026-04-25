@@ -36,7 +36,7 @@ fn hello_pg_wasm() -> &'static str {
     "Hello, pg_wasm"
 }
 
-#[cfg(any(test, feature = "pg_test"))]
+#[cfg(feature = "pg_test")]
 #[pg_schema]
 mod tests {
     use pgrx::prelude::*;

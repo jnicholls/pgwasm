@@ -220,7 +220,7 @@ mod host_tests {
     }
 }
 
-#[cfg(any(test, feature = "pg_test"))]
+#[cfg(feature = "pg_test")]
 #[pgrx::pg_schema]
 mod tests {
     use pgrx::prelude::*;
