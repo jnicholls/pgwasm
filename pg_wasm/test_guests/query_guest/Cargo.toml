@@ -1,0 +1,13 @@
+[package]
+name = "query-guest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "0.57", default-features = false, features = ["macros", "std"] }
+
+[workspace]

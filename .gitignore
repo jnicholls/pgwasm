@@ -3,6 +3,8 @@
 .vscode/
 pg_wasm.code-workspace
 /target
+pg_wasm/target/
+pg_wasm/test_guests/**/target/
 *.iml
 **/*.rs.bk
 Cargo.lock

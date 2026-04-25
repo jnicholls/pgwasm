@@ -14,8 +14,16 @@ use crate::artifacts;
 use crate::errors::PgWasmError;
 use crate::policy::EffectivePolicy;
 
+/// Per-invocation flags for host interfaces (may diverge from linker capabilities later).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct HostState {
+    /// When false, `pg-wasm:host/query` calls fail even if the interface was linked.
+    pub(crate) allow_spi: bool,
+}
+
 /// Per-`Store` state for component instantiation: WASI + shared resource table + optional HTTP.
 pub(crate) struct StoreCtx {
+    pub(crate) host: HostState,
     http: WasiHttpCtx,
     table: ResourceTable,
     wasi: WasiCtx,
@@ -105,9 +113,8 @@ pub(crate) unsafe fn load_precompiled(
     })
 }
 
-/// Build a component linker with WASI (always) and wasi-http when `policy.allow_wasi_http`.
-///
-/// TODO(wave-3: host-interfaces): add `pg_wasm:host/log` and `pg_wasm:host/query` host hooks here.
+/// Build a component linker with WASI (always), wasi-http when `policy.allow_wasi_http`, and
+/// `pg-wasm:host/*` when permitted by `policy`.
 pub(crate) fn build_linker(
     engine: &Engine,
     policy: &EffectivePolicy,
@@ -123,6 +130,7 @@ pub(crate) fn build_linker(
             ))
         })?;
     }
+    super::host::add_to_linker(&mut linker, policy)?;
     Ok(linker)
 }
 
@@ -153,6 +161,9 @@ pub(crate) fn build_store_ctx(policy: &EffectivePolicy) -> Result<StoreCtx, PgWa
     }
     let wasi = builder.build();
     Ok(StoreCtx {
+        host: HostState {
+            allow_spi: policy.allow_spi,
+        },
         http: WasiHttpCtx::new(),
         table: ResourceTable::new(),
         wasi,

@@ -139,9 +139,16 @@ impl PoolInner {
         let instance = linker
             .instantiate(&mut store, &self.component)
             .map_err(|error| {
-                PgWasmError::InvalidModule(format!(
-                    "failed to instantiate pooled component: {error}"
-                ))
+                let message = error.to_string();
+                if message.contains("pg-wasm:host/query") && message.contains("unknown import") {
+                    PgWasmError::PermissionDenied(format!(
+                        "component imports pg-wasm:host/query but SPI is disabled; enable pg_wasm.allow_spi ({message})"
+                    ))
+                } else {
+                    PgWasmError::InvalidModule(format!(
+                        "failed to instantiate pooled component: {error}"
+                    ))
+                }
             })?;
         Ok(PooledSlot { instance, store })
     }

@@ -127,7 +127,7 @@ todos:
     status: completed
   - id: host-interfaces
     content: Implement `pg_wasm:host/log` (maps to `ereport(NOTICE/INFO/WARNING)`) and `pg_wasm:host/query` (SPI read-only by default, gated by `pg_wasm.allow_spi`). Provide WIT text in `pg_wasm/wit/host.wit` and wire into the component `Linker`.
-    status: pending
+    status: completed
   - id: invocation-path
     content: |
       Flesh out `trampoline::pg_wasm_udf_trampoline` to borrow a pooled

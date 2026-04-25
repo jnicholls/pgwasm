@@ -14,6 +14,7 @@ use crate::guc;
 pub(crate) mod component;
 pub(crate) mod core;
 pub(crate) mod engine;
+pub(crate) mod host;
 pub(crate) mod pool;
 
 static EPOCH_TICKER: OnceLock<EpochTickerState> = OnceLock::new();

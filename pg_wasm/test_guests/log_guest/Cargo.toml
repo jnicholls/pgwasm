@@ -1,0 +1,14 @@
+[package]
+name = "log-guest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "0.57", default-features = false, features = ["macros", "std"] }
+
+# Standalone package (not a workspace member of the pg_wasm extension crate).
+[workspace]

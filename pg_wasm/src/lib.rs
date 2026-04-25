@@ -205,6 +205,148 @@ mod tests {
     }
 
     #[pg_test]
+    fn host_log_guest_emits_notice() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        static LOG_GUEST_WASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/log_guest.wasm"));
+
+        let engine = crate::runtime::engine::shared_engine();
+        let component = wasmtime::component::Component::from_binary(engine, LOG_GUEST_WASM)
+            .expect("log guest component");
+        let guc = GucSnapshot::from_gucs();
+        let policy = policy::resolve(&guc, None, None).expect("policy");
+        let linker = crate::runtime::component::build_linker(engine, &policy).expect("linker");
+        let ctx = crate::runtime::component::build_store_ctx(&policy).expect("store ctx");
+        let mut store = wasmtime::Store::new(engine, ctx);
+        let instance = linker
+            .instantiate(&mut store, &component)
+            .expect("instantiate log guest");
+        let run = instance
+            .get_typed_func::<(), ()>(&mut store, "run")
+            .expect("export run");
+        run.call(&mut store, ()).expect("run should succeed");
+    }
+
+    #[pg_test]
+    fn host_query_guest_reads_two_columns_when_spi_enabled() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        static QUERY_GUEST_WASM: &[u8] =
+            include_bytes!(concat!(env!("OUT_DIR"), "/query_guest.wasm"));
+
+        let engine = crate::runtime::engine::shared_engine();
+        let component = wasmtime::component::Component::from_binary(engine, QUERY_GUEST_WASM)
+            .expect("query guest component");
+        let mut guc = GucSnapshot::from_gucs();
+        guc.allow_spi = true;
+        let policy = policy::resolve(&guc, None, None).expect("policy with spi");
+        let linker = crate::runtime::component::build_linker(engine, &policy).expect("linker");
+        let ctx = crate::runtime::component::build_store_ctx(&policy).expect("store ctx");
+        let mut store = wasmtime::Store::new(engine, ctx);
+        let instance = linker
+            .instantiate(&mut store, &component)
+            .expect("instantiate query guest");
+        let run = instance
+            .get_typed_func::<(), (String,)>(&mut store, "run")
+            .expect("export run");
+        let (summary,) = run.call(&mut store, ()).expect("run");
+        assert!(
+            summary.starts_with("cols=2") && summary.contains("cells=2"),
+            "unexpected summary: {summary}"
+        );
+    }
+
+    #[pg_test]
+    fn host_query_guest_instantiation_denied_when_spi_disabled() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        static QUERY_GUEST_WASM: &[u8] =
+            include_bytes!(concat!(env!("OUT_DIR"), "/query_guest.wasm"));
+
+        let engine = crate::runtime::engine::shared_engine();
+        let component = wasmtime::component::Component::from_binary(engine, QUERY_GUEST_WASM)
+            .expect("query guest component");
+        let mut guc = GucSnapshot::from_gucs();
+        guc.allow_spi = false;
+        let policy = policy::resolve(&guc, None, None).expect("policy without spi");
+        let linker = crate::runtime::component::build_linker(engine, &policy).expect("linker");
+        let ctx = crate::runtime::component::build_store_ctx(&policy).expect("store ctx");
+        let mut store = wasmtime::Store::new(engine, ctx);
+        let err = linker
+            .instantiate(&mut store, &component)
+            .expect_err("instantiate should fail without query import");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("pg_wasm.allow_spi"),
+            "expected GUC hint in error, got: {msg}"
+        );
+    }
+
+    #[pg_test]
+    fn host_query_rejects_write_sql() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        static WRITE_GUEST_WASM: &[u8] =
+            include_bytes!(concat!(env!("OUT_DIR"), "/write_query_guest.wasm"));
+
+        let engine = crate::runtime::engine::shared_engine();
+        let component = wasmtime::component::Component::from_binary(engine, WRITE_GUEST_WASM)
+            .expect("write query guest");
+        let mut guc = GucSnapshot::from_gucs();
+        guc.allow_spi = true;
+        let policy = policy::resolve(&guc, None, None).expect("policy");
+        let linker = crate::runtime::component::build_linker(engine, &policy).expect("linker");
+        let ctx = crate::runtime::component::build_store_ctx(&policy).expect("store ctx");
+        let mut store = wasmtime::Store::new(engine, ctx);
+        let instance = linker
+            .instantiate(&mut store, &component)
+            .expect("instantiate");
+        let run = instance
+            .get_typed_func::<(), (String,)>(&mut store, "run")
+            .expect("export run");
+        let (out,) = run.call(&mut store, ()).expect("run");
+        assert!(
+            out.contains("read-only") || out.contains("DELETE"),
+            "expected read-only rejection, got: {out}"
+        );
+    }
+
+    #[pg_test]
+    fn host_query_disabled_per_invocation_when_catalog_narrows_spi() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        static QUERY_GUEST_WASM: &[u8] =
+            include_bytes!(concat!(env!("OUT_DIR"), "/query_guest.wasm"));
+
+        let engine = crate::runtime::engine::shared_engine();
+        let component = wasmtime::component::Component::from_binary(engine, QUERY_GUEST_WASM)
+            .expect("query guest");
+        let mut guc = GucSnapshot::from_gucs();
+        guc.allow_spi = true;
+        let policy_allow = policy::resolve(&guc, None, None).expect("allow");
+        let linker =
+            crate::runtime::component::build_linker(engine, &policy_allow).expect("linker");
+
+        let mut guc_off = guc.clone();
+        guc_off.allow_spi = false;
+        let policy_deny = policy::resolve(&guc_off, None, None).expect("deny");
+        let mut ctx = crate::runtime::component::build_store_ctx(&policy_allow).expect("ctx");
+        ctx.host.allow_spi = policy_deny.allow_spi;
+        let mut store = wasmtime::Store::new(engine, ctx);
+        let instance = linker
+            .instantiate(&mut store, &component)
+            .expect("instantiate");
+        let run = instance
+            .get_typed_func::<(), (String,)>(&mut store, "run")
+            .expect("run export");
+        let (out,) = run.call(&mut store, ()).expect("run");
+        assert!(
+            out.starts_with("ERR:") && out.contains("pg_wasm.allow_spi"),
+            "expected SPI denial in guest error string, got: {out}"
+        );
+    }
+
+    #[pg_test]
     fn unload_unregisters_proc_and_deletes_catalog_rows() {
         Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
 
