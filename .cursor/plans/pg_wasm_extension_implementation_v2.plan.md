@@ -100,7 +100,7 @@ todos:
       enabled) via `wasmtime_wasi_http::p2::add_to_linker_sync`. Implement
       `runtime::pool` with a per-module bounded instance pool sized by
       `pg_wasm.instances_per_module` (new GUC).
-    status: pending
+    status: completed
   - id: component-marshal-dynamic
     content: |
       Implement `mapping::composite` and `mapping::list` on the dynamic

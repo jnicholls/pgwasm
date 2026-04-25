@@ -32,3 +32,4 @@ wit-parser.workspace = true
 
 [dev-dependencies]
 pgrx-tests.workspace = true
+tempfile = "3"
