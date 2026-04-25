@@ -98,10 +98,7 @@ fn read_epoch_tick_ms() -> u64 {
 
 fn register_epoch_ticker_exit_hook() {
     unsafe {
-        pg_sys::on_proc_exit(
-            Some(on_proc_exit_epoch_ticker),
-            pg_sys::Datum::from(0usize),
-        );
+        pg_sys::on_proc_exit(Some(on_proc_exit_epoch_ticker), pg_sys::Datum::from(0usize));
     }
 }
 
@@ -205,7 +202,8 @@ mod host_tests {
     fn ticker_loop_exits_when_engine_drops() {
         let shutdown = Arc::new(AtomicBool::new(false));
         let weak_engine = {
-            let engine = engine::build_engine(false).expect("host test engine should be constructible");
+            let engine =
+                engine::build_engine(false).expect("host test engine should be constructible");
             engine.weak()
         };
         let shutdown_for_thread = Arc::clone(&shutdown);

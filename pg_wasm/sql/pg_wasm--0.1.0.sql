@@ -1,6 +1,6 @@
-CREATE SCHEMA IF NOT EXISTS pg_wasm;
+CREATE SCHEMA IF NOT EXISTS @extschema@;
 
-CREATE TABLE IF NOT EXISTS pg_wasm.modules (
+CREATE TABLE IF NOT EXISTS @extschema@.modules (
     module_id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     abi TEXT NOT NULL,
@@ -16,9 +16,9 @@ CREATE TABLE IF NOT EXISTS pg_wasm.modules (
     generation BIGINT NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS pg_wasm.exports (
+CREATE TABLE IF NOT EXISTS @extschema@.exports (
     export_id BIGSERIAL PRIMARY KEY,
-    module_id BIGINT NOT NULL REFERENCES pg_wasm.modules (module_id) ON DELETE CASCADE,
+    module_id BIGINT NOT NULL REFERENCES @extschema@.modules (module_id) ON DELETE CASCADE,
     wasm_name TEXT NOT NULL,
     sql_name TEXT NOT NULL,
     signature JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -30,9 +30,9 @@ CREATE TABLE IF NOT EXISTS pg_wasm.exports (
     UNIQUE (module_id, sql_name)
 );
 
-CREATE TABLE IF NOT EXISTS pg_wasm.wit_types (
+CREATE TABLE IF NOT EXISTS @extschema@.wit_types (
     wit_type_id BIGSERIAL PRIMARY KEY,
-    module_id BIGINT NOT NULL REFERENCES pg_wasm.modules (module_id) ON DELETE CASCADE,
+    module_id BIGINT NOT NULL REFERENCES @extschema@.modules (module_id) ON DELETE CASCADE,
     wit_name TEXT NOT NULL,
     pg_type_oid OID NOT NULL,
     kind TEXT NOT NULL,
@@ -41,9 +41,9 @@ CREATE TABLE IF NOT EXISTS pg_wasm.wit_types (
     UNIQUE (module_id, pg_type_oid)
 );
 
-CREATE TABLE IF NOT EXISTS pg_wasm.dependencies (
-    module_id BIGINT NOT NULL REFERENCES pg_wasm.modules (module_id) ON DELETE CASCADE,
-    depends_on_module_id BIGINT NOT NULL REFERENCES pg_wasm.modules (module_id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS @extschema@.dependencies (
+    module_id BIGINT NOT NULL REFERENCES @extschema@.modules (module_id) ON DELETE CASCADE,
+    depends_on_module_id BIGINT NOT NULL REFERENCES @extschema@.modules (module_id) ON DELETE CASCADE,
     PRIMARY KEY (module_id, depends_on_module_id),
     CHECK (module_id <> depends_on_module_id)
 );
@@ -68,15 +68,15 @@ GRANT USAGE ON SCHEMA pg_wasm TO pg_wasm_loader;
 GRANT USAGE ON SCHEMA pg_wasm TO pg_wasm_reader;
 
 GRANT SELECT ON TABLE
-    pg_wasm.dependencies,
-    pg_wasm.exports,
-    pg_wasm.modules,
-    pg_wasm.wit_types
+    @extschema@.dependencies,
+    @extschema@.exports,
+    @extschema@.modules,
+    @extschema@.wit_types
 TO pg_wasm_reader;
 
 GRANT DELETE, INSERT, SELECT, UPDATE ON TABLE
-    pg_wasm.dependencies,
-    pg_wasm.exports,
-    pg_wasm.modules,
-    pg_wasm.wit_types
+    @extschema@.dependencies,
+    @extschema@.exports,
+    @extschema@.modules,
+    @extschema@.wit_types
 TO pg_wasm_loader;

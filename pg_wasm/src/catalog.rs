@@ -8,6 +8,12 @@ use serde_json::Value;
 
 use crate::errors::{PgWasmError, Result};
 
+pgrx::extension_sql_file!(
+    "../sql/pg_wasm--0.1.0.sql",
+    name = "catalog_schema",
+    bootstrap
+);
+
 fn default_json_object() -> Value {
     Value::Object(serde_json::Map::new())
 }
@@ -621,19 +627,12 @@ pub(crate) mod migrations {
     use super::*;
 
     pub(super) const TABLE_COLUMNS_SQL: &str = "
-        SELECT a.attname
-        FROM pg_catalog.pg_attribute AS a
-        JOIN pg_catalog.pg_class AS c
-            ON c.oid = a.attrelid
-        JOIN pg_catalog.pg_namespace AS n
-            ON n.oid = c.relnamespace
+        SELECT c.column_name AS attname
+        FROM information_schema.columns AS c
         WHERE
-            n.nspname = 'pg_wasm'
-            AND c.relkind = 'r'
-            AND c.relname = $1
-            AND a.attnum > 0
-            AND NOT a.attisdropped
-        ORDER BY a.attnum
+            c.table_schema = 'pg_wasm'
+            AND c.table_name = $1
+        ORDER BY c.ordinal_position
     ";
 
     pub(super) const EXPECTED_TABLE_COLUMNS: &[(&str, &[&str])] = &[
@@ -695,6 +694,12 @@ pub(crate) mod migrations {
             return;
         }
 
+        if !all_expected_tables_exist() {
+            // During `CREATE EXTENSION`, pg_extension can be visible before all
+            // extension objects are created. Skip shape validation until tables exist.
+            return;
+        }
+
         for (table_name, expected_columns) in EXPECTED_TABLE_COLUMNS {
             let actual_columns = match table_columns(table_name) {
                 Ok(columns) => columns,
@@ -727,6 +732,22 @@ pub(crate) mod migrations {
         .map_err(|error| map_spi_error("checking pg_extension", error))
     }
 
+    fn all_expected_tables_exist() -> bool {
+        let expected_count = EXPECTED_TABLE_COLUMNS.len() as i64;
+        match Spi::get_one::<i64>(
+            "SELECT count(*)
+             FROM pg_catalog.pg_class AS c
+             JOIN pg_catalog.pg_namespace AS n
+               ON n.oid = c.relnamespace
+             WHERE n.nspname = 'pg_wasm'
+               AND c.relkind IN ('r', 'p')
+               AND c.relname = ANY(ARRAY['modules', 'exports', 'wit_types', 'dependencies'])",
+        ) {
+            Ok(Some(actual_count)) => actual_count == expected_count,
+            _ => false,
+        }
+    }
+
     fn table_columns(table_name: &str) -> core::result::Result<Vec<String>, PgWasmError> {
         Spi::connect(|client| {
             let args = vec![table_name.into()];
@@ -754,6 +775,7 @@ pub(crate) fn init() {
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_schema]
 mod tests {
+    use pgrx::prelude::*;
     use pgrx::spi::Spi;
 
     use super::migrations::EXPECTED_TABLE_COLUMNS;

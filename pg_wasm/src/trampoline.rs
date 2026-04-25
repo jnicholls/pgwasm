@@ -1,6 +1,6 @@
 //! Trampoline entrypoint dispatch helpers.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use pgrx::notice;
 use pgrx::pg_guard;

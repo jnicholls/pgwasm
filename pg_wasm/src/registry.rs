@@ -144,8 +144,8 @@ mod tests {
     use pgrx::pg_sys::Oid;
 
     use super::{
-        refresh_from_catalog_with_sources, registry_write, resolve_fn_oid_with_sources,
         CatalogSource, GenerationSource, RegistryEntry, RegistryInner,
+        refresh_from_catalog_with_sources, registry_write, resolve_fn_oid_with_sources,
     };
 
     static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();

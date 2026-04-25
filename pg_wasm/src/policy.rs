@@ -105,7 +105,11 @@ pub(crate) fn resolve(
     let override_policy = overrides.cloned().unwrap_or_default();
     let override_limits = limits.cloned().unwrap_or_default();
 
-    let allow_wasi = resolve_bool("allow_wasi", guc_snapshot.allow_wasi, override_policy.allow_wasi)?;
+    let allow_wasi = resolve_bool(
+        "allow_wasi",
+        guc_snapshot.allow_wasi,
+        override_policy.allow_wasi,
+    )?;
     let allow_wasi_stdio = resolve_bool(
         "allow_wasi_stdio",
         guc_snapshot.allow_wasi_stdio,
@@ -116,14 +120,26 @@ pub(crate) fn resolve(
         guc_snapshot.allow_wasi_env,
         override_policy.allow_wasi_env,
     )?;
-    let allow_wasi_fs = resolve_bool("allow_wasi_fs", guc_snapshot.allow_wasi_fs, override_policy.allow_wasi_fs)?;
-    let allow_wasi_net = resolve_bool("allow_wasi_net", guc_snapshot.allow_wasi_net, override_policy.allow_wasi_net)?;
+    let allow_wasi_fs = resolve_bool(
+        "allow_wasi_fs",
+        guc_snapshot.allow_wasi_fs,
+        override_policy.allow_wasi_fs,
+    )?;
+    let allow_wasi_net = resolve_bool(
+        "allow_wasi_net",
+        guc_snapshot.allow_wasi_net,
+        override_policy.allow_wasi_net,
+    )?;
     let allow_wasi_http = resolve_bool(
         "allow_wasi_http",
         guc_snapshot.allow_wasi_http,
         override_policy.allow_wasi_http,
     )?;
-    let allow_spi = resolve_bool("allow_spi", guc_snapshot.allow_spi, override_policy.allow_spi)?;
+    let allow_spi = resolve_bool(
+        "allow_spi",
+        guc_snapshot.allow_spi,
+        override_policy.allow_spi,
+    )?;
 
     let wasi_preopens = resolve_preopens(
         "wasi_preopens",
@@ -207,18 +223,30 @@ fn parse_csv_string(input: Option<std::ffi::CString>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn resolve_bool(field: &'static str, guc_value: bool, override_value: Option<bool>) -> Result<bool> {
+fn resolve_bool(
+    field: &'static str,
+    guc_value: bool,
+    override_value: Option<bool>,
+) -> Result<bool> {
     if !guc_value && matches!(override_value, Some(true)) {
-        return Err(PgWasmError::PermissionDenied(permission_denied_message(field)));
+        return Err(PgWasmError::PermissionDenied(permission_denied_message(
+            field,
+        )));
     }
 
     Ok(guc_value && override_value.unwrap_or(guc_value))
 }
 
-fn resolve_limit(field: &'static str, guc_ceiling: i32, override_value: Option<i32>) -> Result<i32> {
+fn resolve_limit(
+    field: &'static str,
+    guc_ceiling: i32,
+    override_value: Option<i32>,
+) -> Result<i32> {
     if let Some(value) = override_value {
         if value > guc_ceiling {
-            return Err(PgWasmError::PermissionDenied(permission_denied_message(field)));
+            return Err(PgWasmError::PermissionDenied(permission_denied_message(
+                field,
+            )));
         }
 
         return Ok(value.min(guc_ceiling));
@@ -236,14 +264,17 @@ fn resolve_preopens(
         return Ok(guc_preopens.clone());
     };
 
-    if candidate
-        .iter()
-        .all(|(guest, host)| guc_preopens.get(guest).is_some_and(|allowed| allowed == host))
-    {
+    if candidate.iter().all(|(guest, host)| {
+        guc_preopens
+            .get(guest)
+            .is_some_and(|allowed| allowed == host)
+    }) {
         return Ok(candidate.clone());
     }
 
-    Err(PgWasmError::PermissionDenied(permission_denied_message(field)))
+    Err(PgWasmError::PermissionDenied(permission_denied_message(
+        field,
+    )))
 }
 
 fn resolve_allowed_hosts(
@@ -261,7 +292,9 @@ fn resolve_allowed_hosts(
         return Ok(candidate.clone());
     }
 
-    Err(PgWasmError::PermissionDenied(permission_denied_message(field)))
+    Err(PgWasmError::PermissionDenied(permission_denied_message(
+        field,
+    )))
 }
 
 fn permission_denied_message(field: &str) -> String {
@@ -274,7 +307,7 @@ mod tests {
 
     use crate::config::{Limits, PolicyOverrides};
     use crate::errors::PgWasmError;
-    use crate::policy::{resolve, EffectivePolicy, GucSnapshot};
+    use crate::policy::{EffectivePolicy, GucSnapshot, resolve};
 
     fn base_snapshot() -> GucSnapshot {
         GucSnapshot::new_for_test(
@@ -304,7 +337,10 @@ mod tests {
     fn assert_permission_denied_with_field(error: PgWasmError, field: &str) {
         match error {
             PgWasmError::PermissionDenied(message) => {
-                assert!(message.contains(field), "message `{message}` missing `{field}`");
+                assert!(
+                    message.contains(field),
+                    "message `{message}` missing `{field}`"
+                );
             }
             other => panic!("unexpected error variant: {other:?}"),
         }
@@ -481,7 +517,10 @@ mod tests {
         };
 
         let effective = resolve(&snapshot, Some(&overrides), None).expect("subset accepted");
-        assert_eq!(effective.allowed_hosts, vec!["db.example.com:443".to_string()]);
+        assert_eq!(
+            effective.allowed_hosts,
+            vec!["db.example.com:443".to_string()]
+        );
     }
 
     #[test]
@@ -560,8 +599,14 @@ mod tests {
         let effective = resolve(&snapshot, None, None).expect("defaults accepted");
 
         assert_eq!(effective.max_memory_pages, snapshot.max_memory_pages);
-        assert_eq!(effective.instances_per_module, snapshot.instances_per_module);
+        assert_eq!(
+            effective.instances_per_module,
+            snapshot.instances_per_module
+        );
         assert_eq!(effective.fuel_per_invocation, snapshot.fuel_per_invocation);
-        assert_eq!(effective.invocation_deadline_ms, snapshot.invocation_deadline_ms);
+        assert_eq!(
+            effective.invocation_deadline_ms,
+            snapshot.invocation_deadline_ms
+        );
     }
 }

@@ -69,7 +69,7 @@ todos:
     status: completed
   - id: core-module-scalar-path
     content: Implement `runtime::core` for core modules with scalar-only ABI (i32/i64/f32/f64/bool). Implement `mapping::scalars` and end-to-end load -> trampoline -> call on a fixture `add_i32.wat`. Verify via pg_regress golden output.
-    status: pending
+    status: completed
   - id: wit-type-resolver
     content: |
       Implement `wit::world` (parse components via `wit_component::decode` from

@@ -1,6 +1,6 @@
 //! `pg_proc` registration and DDL generation support.
 
-use std::ffi::{c_void, CStr};
+use std::ffi::{CStr, c_void};
 use std::os::raw::c_char;
 
 use pgrx::list::List;
@@ -507,7 +507,7 @@ mod tests {
 
     use crate::errors::PgWasmError;
 
-    use super::{collision_message, register, unregister, Parallel, ProcSpec, Volatility};
+    use super::{Parallel, ProcSpec, Volatility, collision_message, register, unregister};
 
     static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(1);
 
