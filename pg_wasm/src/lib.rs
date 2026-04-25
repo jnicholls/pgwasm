@@ -50,6 +50,22 @@ mod sql_api {
         crate::lifecycle::reconfigure::reconfigure_impl(module_name, policy, limits)
             .map_err(crate::errors::PgWasmError::into_error_report)
     }
+
+    #[pg_extern]
+    fn unload(
+        module_name: &str,
+        cascade: default!(bool, false),
+    ) -> core::result::Result<bool, pgrx::pg_sys::panic::ErrorReport> {
+        crate::lifecycle::unload::unload_impl(module_name, cascade)
+            .map_err(crate::errors::PgWasmError::into_error_report)
+    }
+
+    #[pg_extern]
+    fn unload_all() -> core::result::Result<i64, pgrx::pg_sys::panic::ErrorReport> {
+        crate::lifecycle::unload::unload_all_impl()
+            .map(|n| n as i64)
+            .map_err(crate::errors::PgWasmError::into_error_report)
+    }
 }
 
 #[cfg(feature = "pg_test")]
@@ -63,7 +79,8 @@ mod tests {
     use crate::catalog::{exports, modules};
     use crate::config::{Limits, PolicyOverrides};
     use crate::errors::PgWasmError;
-    use crate::lifecycle::reconfigure;
+    use crate::lifecycle::unload::test_support as unload_test;
+    use crate::lifecycle::{reconfigure, unload};
     use crate::policy::{self, GucSnapshot};
     use crate::shmem;
 
@@ -185,6 +202,113 @@ mod tests {
         // invocation once the trampoline reads catalog-backed limits per call.
 
         modules::delete(inserted.module_id).expect("cleanup");
+    }
+
+    #[pg_test]
+    fn unload_unregisters_proc_and_deletes_catalog_rows() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        let name = format!("unload_basic_{}", std::process::id());
+        let mid = unload_test::insert_stub_module(&name);
+        let fn_name = format!("unload_fn_{}", std::process::id());
+        let fn_oid = unload_test::register_dummy_sql_fn(&fn_name);
+        let _export_id = unload_test::insert_export_with_fn(mid, "unload_ex", fn_oid);
+
+        assert!(unload_test::pg_proc_exists(fn_oid));
+        assert_eq!(unload_test::count_modules_where_name(&name), 1);
+        assert_eq!(unload_test::count_exports_for_module(mid), 1);
+
+        unload::unload_impl(&name, false).expect("unload");
+
+        assert!(!unload_test::pg_proc_exists(fn_oid));
+        assert_eq!(unload_test::count_modules_where_name(&name), 0);
+        assert_eq!(unload_test::count_exports_for_module(mid), 0);
+    }
+
+    #[pg_test]
+    fn unload_udt_respects_dependencies_and_cascade() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        let pid = std::process::id();
+        let name_a = format!("unload_mod_a_{pid}");
+        let name_b = format!("unload_mod_b_{pid}");
+        let mid_a = unload_test::insert_stub_module(&name_a);
+        let mid_b = unload_test::insert_stub_module(&name_b);
+
+        let type_name = format!("wasm.tunload_T_{pid}");
+        let typ_oid = unload_test::create_composite_type(&type_name);
+        let _wit = unload_test::insert_wit_type_row(mid_a, "T", typ_oid);
+        unload_test::insert_dependency(mid_b, mid_a);
+
+        let err = unload::unload_impl(&name_a, false).expect_err("unload without cascade");
+        match err {
+            PgWasmError::InvalidConfiguration(msg) => {
+                assert!(
+                    msg.contains("cascade"),
+                    "expected cascade hint in message: {msg}"
+                );
+            }
+            other => panic!("expected InvalidConfiguration, got {other:?}"),
+        }
+        assert!(unload_test::type_exists(typ_oid));
+
+        unload::unload_impl(&name_a, true).expect("unload with cascade");
+        assert_eq!(unload_test::count_modules_where_name(&name_a), 0);
+        assert!(!unload_test::type_exists(typ_oid));
+
+        modules::delete(mid_b).expect("cleanup module B");
+    }
+
+    #[pg_test]
+    fn unload_removes_artifact_directory_after_commit() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        let name = format!("unload_artifact_{}", std::process::id());
+        let mid = unload_test::insert_stub_module(&name);
+        let mid_u64 = mid as u64;
+        unload_test::ensure_artifact_dir(mid_u64);
+        assert!(unload_test::artifact_dir_exists(mid_u64));
+
+        unload::unload_impl(&name, false).expect("unload");
+        // `#[pg_test]` runs inside a client transaction that the framework always rolls back, so
+        // `PgXactCallbackEvent::Commit` never fires; mirror production post-commit cleanup here.
+        unload::run_post_commit_unload_work(mid_u64);
+
+        assert!(!unload_test::artifact_dir_exists(mid_u64));
+    }
+
+    #[pg_test]
+    fn unload_defers_disk_cleanup_until_post_commit_work() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        let name = format!("unload_defer_{}", std::process::id());
+        let mid = unload_test::insert_stub_module(&name);
+        let mid_u64 = mid as u64;
+        unload_test::ensure_artifact_dir(mid_u64);
+        assert!(unload_test::artifact_dir_exists(mid_u64));
+
+        unload::unload_impl(&name, false).expect("unload");
+        // Catalog mutations are visible; pool/artifact/shmem cleanup is registered for commit only.
+        assert!(
+            unload_test::artifact_dir_exists(mid_u64),
+            "artifact dir must remain until commit callback or explicit post-commit work"
+        );
+
+        unload::run_post_commit_unload_work(mid_u64);
+        assert!(!unload_test::artifact_dir_exists(mid_u64));
+    }
+
+    #[pg_test]
+    fn unload_missing_module_returns_not_found() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        let err = unload::unload_impl("no_such_wasm_module___", false).expect_err("not found");
+        match err {
+            PgWasmError::NotFound(msg) => {
+                assert!(msg.contains("no_such_wasm_module___"), "message: {msg}");
+            }
+            other => panic!("expected NotFound, got {other:?}"),
+        }
     }
 }
 

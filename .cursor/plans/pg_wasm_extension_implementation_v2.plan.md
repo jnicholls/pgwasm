@@ -118,7 +118,7 @@ todos:
     status: pending
   - id: unload-orchestration
     content: Implement `lifecycle::unload` with `on-unload` hook, `RemoveFunctionById`, UDT drop (respecting `pg_wasm.dependencies` and `options.cascade`), catalog row deletion, artifact dir removal, generation bump.
-    status: pending
+    status: completed
   - id: reload-orchestration
     content: Implement `lifecycle::reload` that preserves `fn_oid` / `pg_type.oid` when signatures/definitions are unchanged, issues `ALTER TYPE` where possible, and errors on breaking changes unless `options.breaking_changes_allowed`. Atomic module.wasm swap via temp + rename.
     status: pending
