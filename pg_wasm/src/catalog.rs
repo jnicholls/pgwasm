@@ -785,7 +785,7 @@ mod tests {
     use pgrx::prelude::*;
     use pgrx::spi::Spi;
 
-    use super::migrations::EXPECTED_TABLE_COLUMNS;
+    use super::{CATALOG_SCHEMA, migrations::EXPECTED_TABLE_COLUMNS};
 
     #[pg_test]
     fn test_catalog_shape_and_role_grants() {
