@@ -4,6 +4,16 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    // macOS: Postgres symbols are resolved when the extension is loaded, not at link time.
+    // Use a build-script link arg so this applies only to the `pg_wasm` cdylib — unlike
+    // `pg_wasm/.cargo/config.toml`, it is not picked up by nested `cargo build` invocations
+    // (e.g. wasm32-wasip2 guests), which would break `wasm-component-ld`.
+    if let Ok(target) = std::env::var("TARGET")
+        && target.contains("apple-darwin")
+    {
+        println!("cargo:rustc-link-arg=-Wl,-undefined,dynamic_lookup");
+    }
+
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
