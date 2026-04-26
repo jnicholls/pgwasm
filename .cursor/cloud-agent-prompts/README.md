@@ -20,7 +20,7 @@ instruction, merge-conflict policy).
 | 3    | 4               | `unload-orchestration`, `host-interfaces`, `invocation-path`, `metrics-and-views` |
 | 4    | 2               | `load-orchestration`, `hooks` |
 | 5    | 3               | `reload-orchestration`, `concurrency-safety`, `pg_upgrade-and-extension-upgrade` |
-| 6    | **1 at a time** | `error-mapping`, then `build-features` |
+| 6    | **1 at a time** | `error-mapping` only (`build-features` closed without implementation) |
 | 7    | 2               | `test-corpus-and-pg_regress`, `integration-tests` |
 
 **Do not start a later wave until every PR of the previous wave has
@@ -48,10 +48,7 @@ For each wave:
   the YAML list; the prompt instructs the agent to keep incoming main
   changes AND re-apply its own status flip for its own todo. No other
   edits to the plan file are allowed.
-- **Wave 6 is serial** because `error-mapping` and `build-features`
-  both touch cross-cutting areas (every emitter of `PgWasmError`,
-  every feature-gated module). Running them in parallel will produce
-  deep merge conflicts.
+- **Wave 6** originally scheduled `error-mapping` then `build-features`; the latter was **closed without implementation**, so only `error-mapping` remains.
 - **`concurrency-safety` in Wave 5** also has a cross-cutting tint
   (wraps LWLock usage around lifecycle entry points). The prompt pins a
   narrow diff and scopes to the `lifecycle/*` + `shmem.rs` boundary,

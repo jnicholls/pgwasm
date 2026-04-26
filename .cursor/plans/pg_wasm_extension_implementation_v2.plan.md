@@ -176,8 +176,10 @@ todos:
     content: Update `README.md` with component-first usage. Write `docs/guc.md` (every GUC with default, scope, hot/cold reconfig), `docs/wit-mapping.md` (the full WIT -> PG table with examples). Reference them from `docs/architecture.md`.
     status: completed
   - id: build-features
-    content: Set `default = ["pg13", "component-model"]`. Feature `core-only` builds without component model by gating `wit/`, `runtime/component`, `mapping/composite`, `mapping/list`. Confirm cargo check passes in both configurations and on `pg13..pg18`.
-    status: pending
+    content: |
+      Set `default = ["pg13", "component-model"]`. Feature `core-only` builds without component model by gating `wit/`, `runtime/component`, `mapping/composite`, `mapping/list`. Confirm cargo check passes in both configurations and on `pg13..pg18`.
+      **Closed without implementation** (2026-04): team decided not to pursue this variant; plan item marked complete so agents do not schedule it.
+    status: completed
 isProject: false
 ---
 
@@ -218,7 +220,7 @@ The `todos` list above is authoritative. Each entry is designed to land in its o
 7. **Error model and concurrency**: `error-mapping`, `concurrency-safety`.
 8. **Operations**: `pg_upgrade-and-extension-upgrade`, `metrics-and-views`.
 9. **Testing**: `test-corpus-and-pg_regress`, `integration-tests`.
-10. **Polish**: `docs-and-readme`, `build-features`.
+10. **Polish**: `docs-and-readme` (~~`build-features`~~ — closed without implementation).
 
 ---
 

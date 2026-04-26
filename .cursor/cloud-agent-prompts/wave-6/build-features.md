@@ -1,4 +1,13 @@
-# Wave-6 Cloud Agent: `build-features` (RUN AFTER `error-mapping` MERGES)
+# Wave-6 Cloud Agent: `build-features` (**CANCELLED — do not run**)
+
+This prompt is **retired**. The plan todo was marked `completed` with a
+note that the work will not be done. Keep the file for history only.
+
+---
+
+# Original prompt (historical)
+
+## ~~Wave-6 Cloud Agent: `build-features` (RUN AFTER `error-mapping` MERGES)~~
 
 **Branch**: `wave-6/build-features` (base: `main`)
 **PR title**: `[wave-6] build-features: component-model feature flag + core-only build`
