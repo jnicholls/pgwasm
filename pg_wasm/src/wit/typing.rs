@@ -46,6 +46,19 @@ pub(crate) struct VariantCasePlan {
     pub(crate) payload: Option<PgType>,
 }
 
+/// Stable WIT type key for [`crate::catalog::wit_types`] rows (`wit_name` column), matching
+/// [`TypePlanEntry::type_key`].
+pub(crate) fn export_type_key_for_id(
+    resolve: &wit_parser::Resolve,
+    type_id: wit_parser::TypeId,
+) -> Result<String, PgWasmError> {
+    let typedef = resolve.types.get(type_id).ok_or_else(|| {
+        PgWasmError::InvalidModule(format!("type id {type_id:?} was not present in resolve"))
+    })?;
+    let wit_name = type_name(typedef, type_id);
+    Ok(build_type_key(resolve, type_id, wit_name.as_str()))
+}
+
 pub(crate) fn plan_types(
     module_prefix: &str,
     decoded: &DecodedWorld,

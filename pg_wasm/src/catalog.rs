@@ -180,6 +180,43 @@ pub(crate) mod modules {
         .map_err(|error| map_spi_error("deleting module row", error))
     }
 
+    /// Delete catalog rows for `module_id` in one SPI session (children then `modules`).
+    ///
+    /// Used when nested `Spi::connect_mut` calls would otherwise leave `modules::delete` blind to
+    /// uncommitted child deletes from a prior SPI snapshot.
+    pub(crate) fn delete_module_tree_for_orphan_recovery(module_id: i64) -> Result<bool> {
+        use pgrx::pg_sys;
+
+        let deleted = Spi::connect_mut(|client| {
+            for sql in [
+                format!("DELETE FROM {CATALOG_SCHEMA}.exports WHERE module_id = $1"),
+                format!("DELETE FROM {CATALOG_SCHEMA}.wit_types WHERE module_id = $1"),
+                format!(
+                    "DELETE FROM {CATALOG_SCHEMA}.dependencies
+                     WHERE module_id = $1 OR depends_on_module_id = $1"
+                ),
+            ] {
+                let args = vec![module_id.into()];
+                client.update(sql.as_str(), None, args.as_slice())?;
+            }
+            let args = vec![module_id.into()];
+            let n = client
+                .update(
+                    format!("DELETE FROM {CATALOG_SCHEMA}.modules WHERE module_id = $1").as_str(),
+                    None,
+                    args.as_slice(),
+                )?
+                .len();
+            unsafe {
+                pg_sys::CommandCounterIncrement();
+            }
+            Ok::<usize, spi::Error>(n)
+        })
+        .map_err(|error| map_spi_error("deleting module tree (orphan recovery)", error))?;
+
+        Ok(deleted > 0)
+    }
+
     fn get_one_by<'a>(
         predicate: &str,
         value: pgrx::datum::DatumWithOid<'a>,
@@ -516,6 +553,24 @@ pub(crate) mod wit_types {
 
     pub(crate) fn get_by_id(wit_type_id: i64) -> Result<Option<WitTypeRow>> {
         get_one_by("wit_type_id = $1", wit_type_id.into())
+    }
+
+    pub(crate) fn get_by_module_and_type_key(
+        module_id: i64,
+        type_key: &str,
+    ) -> Result<Option<WitTypeRow>> {
+        let sql = format!(
+            "SELECT {RETURNING_COLUMNS}
+             FROM {CATALOG_SCHEMA}.wit_types
+             WHERE module_id = $1 AND wit_name = $2"
+        );
+
+        Spi::connect(|client| {
+            let args = vec![module_id.into(), type_key.into()];
+            maybe_first(client.select(sql.as_str(), Some(1), args.as_slice())?)
+                .and_then(|maybe_row| maybe_row.map(|row| wit_type_from_row(&row)).transpose())
+        })
+        .map_err(|error| map_spi_error("reading WIT type row by module and type key", error))
     }
 
     pub(crate) fn list() -> Result<Vec<WitTypeRow>> {

@@ -59,14 +59,21 @@ pub(crate) fn unload_impl(module_name: &str, cascade: bool) -> Result<bool> {
         }
     }
 
+    for row in &export_rows {
+        let _ = exports::delete(row.export_id)?;
+    }
+
+    // `RemoveFunctionById` does not advance the global command counter; SPI `DROP TYPE` can still
+    // consult stale syscache entries and fail with "cache lookup failed for function" when
+    // resolving dependent objects. Match PostgreSQL's pattern after DDL that removes `pg_proc`.
+    unsafe {
+        pg_sys::CommandCounterIncrement();
+    }
+
     let wit_rows = wit_types::list_by_module(module_id)?;
     for row in &wit_rows {
         drop_wit_type_oid(row.pg_type_oid, cascade)?;
         let _ = wit_types::delete(row.wit_type_id)?;
-    }
-
-    for row in &export_rows {
-        let _ = exports::delete(row.export_id)?;
     }
 
     let deleted = modules::delete(module_id)?;
@@ -94,6 +101,40 @@ pub(crate) fn unload_all_impl() -> Result<usize> {
         n += 1;
     }
     Ok(n)
+}
+
+/// Superuser-only best-effort teardown when a prior `unload` aborted mid-flight: catalog rows may
+/// still reference `pg_proc` OIDs that were already removed, so `unload`/`DROP TYPE` can fail with
+/// `cache lookup failed for function`. Mirrors `unload_impl` but ignores unregister/type-drop errors.
+///
+/// Returns `Ok(true)` when a `wasm.modules` row was removed (post-commit cleanup is scheduled).
+pub(crate) fn force_cleanup_orphaned_module_impl(module_name: &str, cascade: bool) -> Result<bool> {
+    require_superuser()?;
+
+    let Some(module) = modules::get_by_name(module_name)? else {
+        return Ok(false);
+    };
+
+    let module_id = module.module_id;
+    let module_id_u64 = u64::try_from(module_id)
+        .map_err(|_| PgWasmError::Internal("module_id does not fit u64".to_string()))?;
+
+    // Do not call `proc_reg::unregister` here: after a partial unload the catalog may still list
+    // `fn_oid` values whose `pg_proc` rows are already gone; `RemoveFunctionById` then errors with
+    // `cache lookup failed for function`. Bulk-delete catalog children so `modules::delete` cannot
+    // be blocked by leftover FK rows or failed per-row SPI deletes.
+    let wit_rows = wit_types::list_by_module(module_id)?;
+    for row in &wit_rows {
+        let _ = drop_wit_type_oid(row.pg_type_oid, cascade);
+    }
+
+    let deleted = modules::delete_module_tree_for_orphan_recovery(module_id)?;
+    if deleted {
+        let active_for_prune = active_module_ids().unwrap_or_default();
+        register_post_commit_cleanup(module_id_u64, active_for_prune);
+    }
+
+    Ok(deleted)
 }
 
 fn require_loader_or_superuser() -> Result<()> {

@@ -121,7 +121,7 @@ todos:
     status: completed
   - id: reload-orchestration
     content: Implement `lifecycle::reload` that preserves `fn_oid` / `pg_type.oid` when signatures/definitions are unchanged, issues `ALTER TYPE` where possible, and errors on breaking changes unless `options.breaking_changes_allowed`. Atomic module.wasm swap via temp + rename.
-    status: pending
+    status: completed
   - id: reconfigure-orchestration
     content: Implement `lifecycle::reconfigure` that updates `policy` / `limits` rows, calls `on-reconfigure` hook, and bumps generation. Confirm `StoreLimits` and epoch deadlines pick up the new values on next call via integration test.
     status: completed
