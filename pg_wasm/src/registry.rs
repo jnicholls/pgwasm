@@ -136,8 +136,8 @@ fn registry_write() -> RwLockWriteGuard<'static, RegistryInner> {
     }
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, not(feature = "pg_test")))]
+mod host_tests {
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Mutex, OnceLock};
 

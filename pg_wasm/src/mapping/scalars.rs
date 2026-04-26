@@ -136,8 +136,8 @@ pub(crate) fn host_query_spi_arg(
     }
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, not(feature = "pg_test")))]
+mod host_tests {
     #[test]
     fn i64_to_i32_bounds() {
         assert!(i32::try_from(0i64).is_ok());

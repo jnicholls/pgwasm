@@ -60,8 +60,8 @@ pub(crate) fn validate(bytes: &[u8]) -> Result<(), PgWasmError> {
         .map_err(|err| PgWasmError::ValidationFailed(format!("{err:#}")))
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, not(feature = "pg_test")))]
+mod host_tests {
     use super::{Abi, AbiOverride, detect};
     use crate::errors::PgWasmError;
 

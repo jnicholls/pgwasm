@@ -841,7 +841,7 @@ pub(crate) fn invoke_component<T>(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "pg_test")))]
 mod host_tests {
     use super::*;
 

@@ -430,8 +430,8 @@ fn json_string_to_string_map(
     Ok(out)
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, not(feature = "pg_test")))]
+mod host_tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
@@ -574,7 +574,6 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(not(feature = "pg_test"))]
     #[test]
     fn on_load_err_maps_to_invalid_configuration() -> Result<()> {
         let _guard = lock_hook_tests();
@@ -604,7 +603,6 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(not(feature = "pg_test"))]
     #[test]
     fn on_unload_trap_returns_ok_from_inner() -> Result<()> {
         let _guard = lock_hook_tests();

@@ -574,8 +574,8 @@ fn sanitize_ident(raw: &str) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, not(feature = "pg_test")))]
+mod host_tests {
     use std::collections::HashMap;
 
     use wit_component::{ComponentEncoder, StringEncoding, embed_component_metadata};

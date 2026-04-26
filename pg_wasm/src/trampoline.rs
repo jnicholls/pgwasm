@@ -551,7 +551,7 @@ mod reconfigure {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "pg_test")))]
 mod host_tests {
     use wasmtime::Trap;
 

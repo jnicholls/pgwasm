@@ -44,7 +44,7 @@ impl GucSnapshot {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "pg_test")))]
 impl GucSnapshot {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_for_test(
@@ -302,8 +302,8 @@ fn permission_denied_message(field: &str) -> String {
     format!("override attempts to widen `{field}`")
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, not(feature = "pg_test")))]
+mod host_tests {
     use std::collections::BTreeMap;
 
     use crate::config::{Limits, PolicyOverrides};

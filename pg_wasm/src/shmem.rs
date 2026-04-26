@@ -608,7 +608,7 @@ unsafe fn release_unless_elog_unwinding(lock: *mut pg_sys::LWLock) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "pg_test")))]
 mod host_tests {
     use super::find_contiguous_free_range;
 

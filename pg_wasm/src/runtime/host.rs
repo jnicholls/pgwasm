@@ -263,8 +263,8 @@ fn text_fallback(typoid: pg_sys::Oid, datum: pg_sys::Datum) -> Result<query::Val
     Ok(query::Value::Text(s))
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, not(feature = "pg_test")))]
+mod host_tests {
     use std::path::Path;
 
     use wit_parser::Resolve;

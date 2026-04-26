@@ -65,8 +65,8 @@ fn print_wit_text(resolve: &Resolve, world_id: WorldId) -> Result<String, PgWasm
     Ok(printer.output.to_string())
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, not(feature = "pg_test")))]
+mod host_tests {
     use wit_component::{ComponentEncoder, StringEncoding, embed_component_metadata};
 
     use super::*;

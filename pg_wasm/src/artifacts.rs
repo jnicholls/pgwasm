@@ -283,9 +283,9 @@ pub(crate) fn prune_stale_unlocked(active_ids: &BTreeSet<u64>) -> io::Result<usi
 }
 
 fn resolve_data_dir() -> io::Result<PathBuf> {
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "pg_test")))]
     {
-        use self::tests::lock_test_data_dir_override;
+        use self::host_tests::lock_test_data_dir_override;
 
         if let Some(test_data_dir) = lock_test_data_dir_override().clone() {
             return Ok(test_data_dir);
@@ -296,7 +296,7 @@ fn resolve_data_dir() -> io::Result<PathBuf> {
         return Ok(cached_data_dir.clone());
     }
 
-    #[cfg(not(test))]
+    #[cfg(any(not(test), feature = "pg_test"))]
     {
         // SAFETY: PostgreSQL owns DataDir and keeps it valid for backend lifetime.
         let data_dir_ptr = unsafe { pgrx::pg_sys::DataDir };
@@ -322,7 +322,7 @@ fn resolve_data_dir() -> io::Result<PathBuf> {
         Ok(data_dir)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "pg_test")))]
     {
         Err(io::Error::new(
             ErrorKind::NotFound,
@@ -414,8 +414,8 @@ fn sha256_hex(sha: &[u8; 32]) -> String {
     text
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, not(feature = "pg_test")))]
+mod host_tests {
     use std::{
         env, fs,
         path::PathBuf,

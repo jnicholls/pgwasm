@@ -115,7 +115,7 @@ pub(crate) fn run_epoch_ticker_loop(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "pg_test")))]
 mod host_tests {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};

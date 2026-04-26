@@ -584,7 +584,7 @@ mod core_invoke_regress {
 
 /// This module is required by `cargo pgrx test` invocations.
 /// It must be visible at the root of your extension crate.
-#[cfg(test)]
+#[cfg(all(test, feature = "pg_test"))]
 pub mod pg_test {
     pub fn setup(_options: Vec<&str>) {
         // perform one-off initialization when the pg_test framework starts
