@@ -11,7 +11,7 @@ use wasmtime::{Store, StoreLimits, StoreLimitsBuilder};
 
 use crate::artifacts;
 use crate::catalog::{exports, modules};
-use crate::errors::{DEFAULT_WASMTIME_VERSION, ErrorContext, PgWasmError, map_wasmtime_err};
+use crate::errors::{DEFAULT_WASMTIME_VERSION, ErrorContext, PgWasmError};
 use crate::guc;
 use crate::mapping::composite::{self, Export, ExportSlot, MarshalPlan, plan_marshaler};
 use crate::policy::{self, EffectivePolicy, GucSnapshot};
@@ -320,9 +320,7 @@ fn invoke_component_export(
         None => vec![],
     };
 
-    let call_outcome = func
-        .call(&mut *store, &args_val, &mut results_val)
-        .map_err(map_wasmtime_err);
+    let call_outcome = composite::invoke_component(&func, &mut *store, &args_val, &mut results_val);
 
     let fuel_after =
         if fuel_before.is_some() {

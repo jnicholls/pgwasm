@@ -5,6 +5,9 @@ use std::sync::{OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use pgrx::pg_sys::Oid;
 
+use crate::catalog;
+use crate::shmem;
+
 /// Process-local fn_oid registry cache used by the trampoline.
 pub(crate) static FN_OID_MAP: OnceLock<RwLock<RegistryInner>> = OnceLock::new();
 
@@ -66,18 +69,35 @@ trait CatalogSource {
 
 pub(crate) struct DefaultSources;
 
-// TODO(shmem-and-generation, catalog-schema): swap these stubs for
-// `shmem::read_generation()` and `catalog::exports::list()` once those todo
-// owners land their Wave-1 changes.
 impl GenerationSource for DefaultSources {
     fn read(&self) -> u64 {
-        0
+        shmem::read_generation()
     }
 }
 
 impl CatalogSource for DefaultSources {
     fn list_exports(&self) -> Vec<RegistryEntry> {
-        vec![]
+        match catalog::exports::list() {
+            Ok(rows) => {
+                let mut next_export_index_by_module = HashMap::<u64, u32>::new();
+                rows.into_iter()
+                    .filter_map(|row| {
+                        let module_id = u64::try_from(row.module_id).ok()?;
+                        let export_index = *next_export_index_by_module
+                            .entry(module_id)
+                            .and_modify(|next| *next = next.saturating_add(1))
+                            .or_insert(0);
+                        let fn_oid = row.fn_oid?;
+                        Some(RegistryEntry {
+                            module_id,
+                            export_index,
+                            fn_oid,
+                        })
+                    })
+                    .collect()
+            }
+            Err(_) => vec![],
+        }
     }
 }
 

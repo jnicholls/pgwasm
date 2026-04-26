@@ -16,7 +16,7 @@ use pgrx::tupdesc::PgTupleDesc;
 use wasmtime::Store;
 use wasmtime::component::{Func, Val};
 
-use crate::errors::PgWasmError;
+use crate::errors::{PgWasmError, map_wasmtime_err};
 use crate::wit::typing::{CompositeField, PgType, TypePlan};
 
 use super::list;
@@ -826,18 +826,14 @@ fn heap_tuple_two_fields(
     })
 }
 
-/// Call a dynamic component function, write results into `results`, then run `post_return`.
+/// Call a dynamic component function and write results into `results`.
 pub(crate) fn invoke_component<T>(
     func: &Func,
     store: &mut Store<T>,
     args: &[Val],
     results: &mut [Val],
 ) -> Result<(), PgWasmError> {
-    func.call(store, args, results).map_err(|e| {
-        PgWasmError::Internal(format!(
-            "component func.call failed (TODO wave-3 trap mapping): {e}"
-        ))
-    })?;
+    func.call(store, args, results).map_err(map_wasmtime_err)?;
     Ok(())
 }
 

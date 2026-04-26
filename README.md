@@ -9,9 +9,8 @@ capabilities are configured by the database administrator.
 
 > Status: this is the **v2** rewrite. The
 > [implementation plan](.cursor/plans/pg_wasm_extension_implementation_v2.plan.md)
-> tracks what ships and what is still in progress. Only a small subset of
-> its todos is `completed` today — consult the plan for the authoritative
-> status of each subsystem.
+> tracks what ships; all listed v2 implementation tasks are complete, with
+> the build-feature split closed intentionally without implementation.
 
 ## Table of contents
 
@@ -33,15 +32,15 @@ capabilities are configured by the database administrator.
 - **Typed, not buffered.** Records become composite types, enums become PG
   enums, variants and flags become composite / domain types, lists become
   arrays or `bytea`. You do not marshal JSON on either side.
-- **Run once, call many.** Modules are compiled at `pg_wasm.load` time and
+- **Run once, call many.** Modules are compiled at `wasm.load` time and
   their AOT artifacts live under `$PGDATA/pg_wasm/<module_id>/`. Per-call
   overhead is a pool'd component instance plus argument marshaling.
 - **Strong sandbox.** WASI filesystem, sockets, HTTP, and environment
   access are all **off by default**. Administrators widen the ceiling with
   `pg_wasm.*` GUCs; per-module overrides can only **narrow** that ceiling.
 - **Durable, observable.** Module metadata is in catalog tables; counters
-  and gauges live in shared memory; `pg_wasm.modules`,
-  `pg_wasm.functions`, `pg_wasm.stats` and friends expose both as SRF
+  and gauges live in shared memory; `wasm.modules`, `wasm.functions`,
+  `wasm.stats` and friends expose both as SRF
   views.
 
 ## Quick start
@@ -63,8 +62,8 @@ CREATE EXTENSION pg_wasm;
 SHOW pg_wasm.enabled;
 ```
 
-> The roles `pg_wasm_loader` (may load / unload / reload / reconfigure
-> modules) and `pg_wasm_reader` (may read `pg_wasm.stats`) are created by
+> The roles `wasm_loader` (may load / unload / reload / reconfigure
+> modules) and `wasm_reader` (may read `wasm.stats`) are created by
 > `CREATE EXTENSION`. Grant membership deliberately; loading a module is a
 > privileged operation.
 
@@ -88,7 +87,7 @@ for Rust). You should end up with `arith.component.wasm`.
 
 ```sql
 -- Load the component from bytes (bytea overload).
-SELECT pg_wasm.load(
+SELECT wasm.load(
     wasm    => pg_read_binary_file('arith.component.wasm'),
     name    => 'arith',
     options => '{}'::jsonb
@@ -98,14 +97,14 @@ SELECT pg_wasm.load(
 SELECT arith_add(2, 3);          --> 5
 
 -- Inspect everything the extension knows about this module.
-SELECT module_id, name, abi, generation FROM pg_wasm.modules();
-SELECT export_id, sql_name, wasm_name, signature FROM pg_wasm.functions();
+SELECT module_id, name, abi, generation FROM wasm.modules();
+SELECT export_id, sql_name, wasm_name, signature FROM wasm.functions();
 
 -- Tear it down when you are done.
-SELECT pg_wasm.unload(module_id) FROM pg_wasm.modules() WHERE name = 'arith';
+SELECT wasm.unload(module_id) FROM wasm.modules() WHERE name = 'arith';
 ```
 
-The `text` overload `pg_wasm.load(path text, ...)` is available for file
+The `text` overload `wasm.load(path text, ...)` is available for file
 system loads, subject to `pg_wasm.allow_load_from_file`,
 `pg_wasm.module_path`, and `pg_wasm.allowed_path_prefixes`. See
 [docs/guc.md](docs/guc.md#path-and-io-controls) for the full list.
@@ -118,8 +117,8 @@ To let a module reach the network, an administrator must set both the
 master toggle (`pg_wasm.allow_wasi`) and the specific capability
 (`pg_wasm.allow_wasi_net`, `pg_wasm.allow_wasi_http`), and populate
 `pg_wasm.allowed_hosts`. A module author can still opt to narrow further
-— see the `policy` / `limits` keys in the `options` JSON accepted by
-`pg_wasm.load` and `pg_wasm.reconfigure`.
+-- see the `policy` / `limits` keys in the `options` JSON accepted by
+`wasm.load` and `wasm.reconfigure`.
 
 See [docs/guc.md](docs/guc.md) for every GUC, default, scope, and
 hot/cold reconfiguration semantics.

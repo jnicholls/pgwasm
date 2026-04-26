@@ -9,6 +9,9 @@ introspection.
 The implementation plan that materializes this design lives at
 [`.cursor/plans/pg_wasm_extension_implementation_v2.plan.md`](../.cursor/plans/pg_wasm_extension_implementation_v2.plan.md).
 
+SQL objects live in the extension schema (`wasm` by default, from
+`pg_wasm.control`); configuration parameters keep the `pg_wasm.*` prefix.
+
 ---
 
 ## 1. Goals and non-goals
@@ -29,8 +32,8 @@ The implementation plan that materializes this design lives at
 - **Strong, layered sandbox.** WASI and host capabilities are off by default.
   Administrators enable them through GUCs at extension scope; module loaders
   can further **narrow** (never broaden) those defaults per module.
-- **Lifecycle in SQL.** `pg_wasm.load`, `pg_wasm.unload`, `pg_wasm.reload`,
-  and `pg_wasm.reconfigure` are first-class SQL functions. Administrative
+- **Lifecycle in SQL.** `wasm.load`, `wasm.unload`, `wasm.reload`,
+  and `wasm.reconfigure` are first-class SQL functions. Administrative
   state is durable across PostgreSQL restarts.
 - **Observability.** Per-module and per-function counters, timings, errors,
   and resource snapshots are visible through SQL views.
@@ -53,9 +56,9 @@ The implementation plan that materializes this design lives at
 ```mermaid
 flowchart TB
   subgraph SQL["PostgreSQL"]
-    API["pg_wasm.load / unload / reload / reconfigure"]
+    API["wasm.load / unload / reload / reconfigure"]
     UDF["schema.prefix_export(...)"]
-    Views["pg_wasm.modules / functions / stats / types"]
+    Views["wasm.modules / functions / stats / types"]
     Catalog["pg_proc, pg_type, pg_depend"]
   end
 
@@ -69,7 +72,7 @@ flowchart TB
 
   subgraph ClusterState["Cluster state"]
     Shmem["pg_wasm shared memory (metrics, registry generation)"]
-    CatalogTables["pg_wasm catalog tables: modules, exports, wit_types, policies"]
+    CatalogTables["extension-schema catalog tables: modules, exports, wit_types, policies"]
     Fs["$PGDATA/pg_wasm/ (compiled artifacts, WIT text)"]
   end
 
@@ -117,7 +120,7 @@ pg_wasm/
     catalog/                         # durable cluster state
       mod.rs
       schema.rs                      # CREATE TABLE / INDEX DDL
-      modules.rs                     # CRUD on pg_wasm.modules
+      modules.rs                     # CRUD on extension-schema modules
       exports.rs
       wit_types.rs
       migrations.rs
@@ -183,10 +186,10 @@ by the extension and participate in `DROP EXTENSION ... CASCADE` cleanup.
 
 | Table | Columns (abridged) | Purpose |
 |-------|--------------------|---------|
-| `pg_wasm.modules` | `module_id bigserial pk`, `name text unique`, `abi text`, `wasm_sha256 bytea`, `artifact_path text`, `wit_world text`, `policy jsonb`, `limits jsonb`, `created_at`, `updated_at`, `generation bigint` | One row per loaded module. `wit_world` stores the textual WIT world interface; `policy`/`limits` are the merged module-scoped overrides. |
-| `pg_wasm.exports` | `export_id bigserial pk`, `module_id fk`, `wasm_name text`, `sql_name text`, `signature jsonb`, `fn_oid oid`, `kind text` | One row per SQL-visible export. `signature` is the normalized WIT signature used to rebuild marshaling code. |
-| `pg_wasm.wit_types` | `wit_type_id bigserial pk`, `module_id fk`, `wit_name text`, `pg_type_oid oid`, `kind text` (`record`, `variant`, `enum`, `flags`, `domain`), `definition jsonb` | One row per UDT / enum / flags / domain registered in the PG catalog on behalf of this module. |
-| `pg_wasm.dependencies` | `module_id fk`, `depends_on_module_id fk` | Used when WIT types are reused across modules (see §6.3). |
+| `wasm.modules` | `module_id bigserial pk`, `name text unique`, `abi text`, `wasm_sha256 bytea`, `artifact_path text`, `wit_world text`, `policy jsonb`, `limits jsonb`, `created_at`, `updated_at`, `generation bigint` | One row per loaded module. `wit_world` stores the textual WIT world interface; `policy`/`limits` are the merged module-scoped overrides. |
+| `wasm.exports` | `export_id bigserial pk`, `module_id fk`, `wasm_name text`, `sql_name text`, `signature jsonb`, `fn_oid oid`, `kind text` | One row per SQL-visible export. `signature` is the normalized WIT signature used to rebuild marshaling code. |
+| `wasm.wit_types` | `wit_type_id bigserial pk`, `module_id fk`, `wit_name text`, `pg_type_oid oid`, `kind text` (`record`, `variant`, `enum`, `flags`, `domain`), `definition jsonb` | One row per UDT / enum / flags / domain registered in the PG catalog on behalf of this module. |
+| `wasm.dependencies` | `module_id fk`, `depends_on_module_id fk` | Used when WIT types are reused across modules (see §6.3). |
 
 All tables are regular (not unlogged, not temporary): we want WAL coverage so
 that replication reproduces the extension state.
@@ -226,7 +229,7 @@ extension never trusts catalog rows without a matching checksum on disk.
 The segment is sized by fixed compile-time constants in `shmem.rs`
 (`SHMEM_MODULE_SLOTS = 256`, `SHMEM_EXPORT_SLOTS = 4096`). If more modules
 than capacity are loaded, the
-excess gets dynamic (non-shared) counters and `pg_wasm.stats` reports
+excess gets dynamic (non-shared) counters and `wasm.stats` reports
 `shared := false` for those rows; this is a degraded mode, not an error.
 
 ---
@@ -235,25 +238,25 @@ excess gets dynamic (non-shared) counters and `pg_wasm.stats` reports
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Loaded: pg_wasm.load()
-  Loaded --> Reconfigured: pg_wasm.reconfigure()
+  [*] --> Loaded: wasm.load()
+  Loaded --> Reconfigured: wasm.reconfigure()
   Reconfigured --> Reconfigured
-  Loaded --> Reloaded: pg_wasm.reload()
+  Loaded --> Reloaded: wasm.reload()
   Reconfigured --> Reloaded
   Reloaded --> Reloaded
-  Loaded --> Unloaded: pg_wasm.unload()
+  Loaded --> Unloaded: wasm.unload()
   Reconfigured --> Unloaded
   Reloaded --> Unloaded
   Unloaded --> [*]
 ```
 
-### 5.1 `pg_wasm.load(source, name, options)`
+### 5.1 `wasm.load(source, name, options)`
 
 Two overloads converge on `load::from_bytes`:
 
 ```sql
-pg_wasm.load(wasm bytea,  name text default null, options jsonb default null) returns bigint
-pg_wasm.load(path text,   name text default null, options jsonb default null) returns bigint
+wasm.load(wasm bytea,  name text default null, options jsonb default null) returns bigint
+wasm.load(path text,   name text default null, options jsonb default null) returns bigint
 ```
 
 Steps, in order (all inside one explicit transaction block so partial state
@@ -277,7 +280,7 @@ is rolled back on failure):
     - If the type is already registered for this module (reload path) and its
       definition is unchanged, reuse the existing `pg_type.oid`.
     - Else, synthesize the PG `CREATE TYPE` / `CREATE DOMAIN` DDL and run it,
-      recording rows in `pg_wasm.wit_types` and `recordDependencyOn`.
+      recording rows in `wasm.wit_types` and `recordDependencyOn`.
 7. **Plan exports.** Each exported function maps to one `pg_proc` row using
    the trampoline symbol. Function names follow `<prefix>_<export>` where
    `prefix` is `name` or the slugified WIT world name. Reject name
@@ -301,7 +304,7 @@ All of this runs inside one SPI transaction; a failure at any step issues
 `ereport(ERROR)` and the SQL-level rollback cleans catalog rows, and a
 best-effort cleanup removes on-disk artifacts.
 
-### 5.2 `pg_wasm.unload(module_id)`
+### 5.2 `wasm.unload(module_id)`
 
 1. AuthZ as above.
 2. Call `on-unload` hook (best-effort; hook failure is logged, not fatal).
@@ -310,12 +313,12 @@ best-effort cleanup removes on-disk artifacts.
    references a WIT type (see §6.3), refuse the unload unless
    `options.cascade = true`, in which case dependent modules are unloaded
    first.
-5. Delete rows from `pg_wasm.exports`, `pg_wasm.wit_types`, `pg_wasm.modules`.
+5. Delete rows from `wasm.exports`, `wasm.wit_types`, `wasm.modules`.
 6. Remove `$PGDATA/pg_wasm/<module_id>/`.
 7. Bump generation. Backends drop their local `ModuleHandle` on next trampoline
    entry that sees a removed module.
 
-### 5.3 `pg_wasm.reload(module_id, source := null, options := null)`
+### 5.3 `wasm.reload(module_id, source := null, options := null)`
 
 Reload replaces the module's **bytes** (and therefore exports and WIT types)
 without destroying its SQL identity when possible. It runs as unload+load
@@ -335,10 +338,10 @@ If `source` is `null`, reload reads `module.wasm` from disk (useful for
 re-compiling after a Wasmtime upgrade). If provided, the new bytes replace
 `module.wasm` atomically (temp-file + rename).
 
-### 5.4 `pg_wasm.reconfigure(module_id, options)`
+### 5.4 `wasm.reconfigure(module_id, options)`
 
 Reconfigure **does not touch code or types**. It updates `policy` and
-`limits` in `pg_wasm.modules`, re-computes the `EffectivePolicy`, and bumps
+`limits` in `wasm.modules`, re-computes the `EffectivePolicy`, and bumps
 the generation. The next instantiation in each backend picks up the new
 values. If the component exports `on-reconfigure`, it is called with the new
 config blob before the generation bump completes.
@@ -357,9 +360,8 @@ A single `wasmtime::Engine` per backend process is built lazily on first use
 from a `wasmtime::Config` configured with the v43 builder-style API:
 
 - `Config::wasm_component_model(true)` — required to compile and instantiate
-  components (`wasmtime::component::Component`). This is also the default
-  when the `component-model` crate feature is enabled, but we set it
-  explicitly so the engine fails fast if someone disables the feature.
+  components (`wasmtime::component::Component`). The component model is always
+  compiled in for v2, and the engine sets this explicitly.
 - `Config::epoch_interruption(true)` to enforce wall-clock deadlines. Stores
   are configured with `Store::set_epoch_deadline` before each call and the
   default expiration action (`Store::epoch_deadline_trap`) is kept so a
@@ -395,7 +397,7 @@ resources; `Engine::increment_epoch` is signal-safe per its documentation.
 
 ### 6.2 Compile and cache
 
-Compilation happens in `pg_wasm.load`. The resulting `Component` (or
+Compilation happens in `wasm.load`. The resulting `Component` (or
 `Module`) is stored in two places:
 
 1. **Process-local** `registry::MODULES` as a `ModuleHandle` wrapping the
@@ -476,9 +478,9 @@ Each call sequence:
    with slices of `component::Val` (the v43 API takes a result buffer
    rather than returning a `Vec`). For the static path we use
    `wasmtime::component::bindgen!`-generated bindings and
-   `component::TypedFunc::call`. After a blocking synchronous component
-   call, `Func::post_return` is invoked to release lowered results before
-   the next call on the same instance.
+   `component::TypedFunc::call`. The historical `Func::post_return` call is
+   no longer required by the current Wasmtime API and is intentionally not
+   called.
 4. Update metrics; return the instance to the pool.
 
 Instances are rebuilt on every generation bump for the owning module.
@@ -630,7 +632,7 @@ and validates compatibility.
 
 ### 8.2 UDT registration
 
-`wit::udt::register_type_plan` runs DDL via SPI during `pg_wasm.load`:
+`wit::udt::register_type_plan` runs DDL via SPI during `wasm.load`:
 
 - `CREATE TYPE <module_prefix>_<record> AS (...)` for records and tuples.
 - `CREATE TYPE <module_prefix>_<enum> AS ENUM (...)` for enums.
@@ -639,7 +641,7 @@ and validates compatibility.
 - `recordDependencyOn(type_oid, extension_oid, DEPENDENCY_EXTENSION)` so
   `DROP EXTENSION` cleans up.
 
-Type OIDs are persisted in `pg_wasm.wit_types`. On reload with unchanged
+Type OIDs are persisted in `wasm.wit_types`. On reload with unchanged
 definitions, we reuse them; on breaking changes we drop and recreate behind
 the opt-in flag (§5.3).
 
@@ -679,7 +681,7 @@ into flat reference tables:
   `ALTER SYSTEM SET` work.
 - [`docs/wit-mapping.md`](wit-mapping.md) — the canonical WIT →
   PostgreSQL type table (this section, expanded) with a WIT fragment, the
-  DDL `pg_wasm.load` issues, and a sample `SELECT` for every primitive,
+  DDL `wasm.load` issues, and a sample `SELECT` for every primitive,
   composite, generic, and resource kind.
 
 ---
@@ -712,9 +714,8 @@ sequenceDiagram
 
 Notable properties:
 
-- **`catch_unwind`**: the trampoline wraps WASM execution in
-  `std::panic::catch_unwind`. Panics inside host glue become SQL errors with
-  the module id and export name.
+- **Error mapping**: the trampoline converts Wasmtime traps into SQLSTATE-aware
+  `PgWasmError` values with module and export context in DETAIL.
 - **Interrupt handling**: Postgres query cancellation sets a flag the epoch
   ticker thread observes; the next `Engine::increment_epoch` tick causes
   the running call to terminate with `wasmtime::Trap::Interrupt` (the
@@ -735,13 +736,13 @@ Shared-memory counters back three SQL table functions:
 
 | Function | Columns (abridged) |
 |----------|--------------------|
-| `pg_wasm.modules()` | `module_id`, `name`, `abi`, `wasm_sha256`, `artifact_path`, `wit_world`, `policy`, `limits`, `generation`, `loaded_at`, `live_instances`, `peak_memory_pages` |
-| `pg_wasm.functions()` | `export_id`, `module_id`, `sql_name`, `wasm_name`, `signature`, `fn_oid`, `volatility`, `invocations`, `errors`, `total_ns`, `last_error_at` |
-| `pg_wasm.stats()` | `export_id`, process `pid`, `invocations`, `errors`, `fuel_consumed`, `memory_peak_pages`, `traps_by_kind jsonb` — per-process view useful when debugging |
-| `pg_wasm.wit_types()` | `wit_type_id`, `module_id`, `wit_name`, `pg_type_oid`, `kind`, `definition` |
-| `pg_wasm.policy_effective()` | `module_id`, each policy / limit column resolved against current GUCs |
+| `wasm.modules()` | `module_id`, `name`, `abi`, `wasm_sha256`, `artifact_path`, `wit_world`, `policy`, `limits`, `generation`, `loaded_at`, `live_instances`, `peak_memory_pages` |
+| `wasm.functions()` | `export_id`, `module_id`, `sql_name`, `wasm_name`, `signature`, `fn_oid`, `volatility`, `invocations`, `errors`, `total_ns`, `last_error_at` |
+| `wasm.stats()` | `export_id`, process `pid`, `invocations`, `errors`, `fuel_consumed`, `memory_peak_pages`, `traps_by_kind jsonb` — per-process view useful when debugging |
+| `wasm.wit_types()` | `wit_type_id`, `module_id`, `wit_name`, `pg_type_oid`, `kind`, `definition` |
+| `wasm.policy_effective()` | `module_id`, each policy / limit column resolved against current GUCs |
 
-All views are SRF-based and implemented in `views.rs`. `pg_wasm.stats()` is
+All views are SRF-based and implemented in `views.rs`. `wasm.stats()` is
 the only per-process view; the rest are cluster-wide.
 
 ---
@@ -802,8 +803,8 @@ fields so clients can react programmatically.
 - **No dynamic linking.** We do not expose `dlopen`-like capabilities to
   guests; components declare their imports statically and we either satisfy
   them from the allow-list or refuse to instantiate.
-- **Metrics disclosure.** `pg_wasm.stats()` is readable by the
-  `pg_wasm_reader` role (GRANTed by the extension SQL); other catalog views
+- **Metrics disclosure.** `wasm.stats()` is readable by the
+  `wasm_reader` role (GRANTed by the extension SQL); other catalog views
   are world-readable because they leak nothing beyond what `pg_proc` already
   exposes.
 
@@ -841,14 +842,10 @@ Fixtures:
 
 ## 15. Build features
 
-`pg_wasm/Cargo.toml`:
-
-- `default = ["pg13", "component-model"]`
-- `component-model` (default): pulls `wasmtime` with
-  `component-model`, `wasmtime-wasi`, `wasmtime-wasi-http`, `wit-component`,
-  `wit-parser`.
-- `core-only`: disables component model; only the core path is compiled.
-- `pg13 … pg18`: as today.
+`pg_wasm/Cargo.toml` currently defaults to `pg17` and keeps the component
+model always enabled. The earlier `component-model` / `core-only` feature split
+was closed without implementation; v2 remains Wasmtime-only with both component
+and degraded core paths compiled.
 
 No `runtime-extism`, no `runtime-wasmer`: v2 is Wasmtime-only.
 
@@ -860,7 +857,7 @@ No `runtime-extism`, no `runtime-wasmer`: v2 is Wasmtime-only.
 - Optional integration with `log_destination = jsonlog` by embedding the
   `module_id`, `export_id`, and `wasmtime_version` in every error.
 - Counters exported to shared memory are consumable by `pg_stat_*` scraping
-  tools through the `pg_wasm.stats()` view; no external dependency is
+  tools through the `wasm.stats()` view; no external dependency is
   required.
 
 ---

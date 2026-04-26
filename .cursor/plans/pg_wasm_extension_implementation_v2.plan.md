@@ -109,9 +109,9 @@ todos:
       records (named + anonymous tuples), variants, enums, flags, options,
       results, and typed lists. Call exports via
       `wasmtime::component::Func::call(&mut store, &[Val], &mut [Val])` (v43
-      takes a caller-provided result slice rather than returning a `Vec`) and
-      call `Func::post_return` after each invocation before reusing the
-      instance.
+      takes a caller-provided result slice rather than returning a `Vec`);
+      `Func::post_return` is deprecated and a no-op in the resolved Wasmtime
+      43 API, so the dynamic path does not call it.
     status: completed
   - id: load-orchestration
     content: Implement `lifecycle::load` running AuthZ -> read -> validate -> classify -> resolve WIT -> plan types -> plan exports -> resolve policy -> compile + persist -> register procs -> on-load hook -> bump generation. All DDL runs via SPI inside one transaction; failure rolls everything back and removes the module dir.
@@ -141,8 +141,7 @@ todos:
       `ERRCODE_QUERY_CANCELED`, `Trap::OutOfFuel` ->
       `ERRCODE_PROGRAM_LIMIT_EXCEEDED`, other `Trap` variants ->
       `PgWasmError::Trap { kind }` with `ERRCODE_EXTERNAL_ROUTINE_EXCEPTION`.
-      Wrap in `std::panic::catch_unwind`.
-    status: pending
+    status: completed
   - id: metrics-and-views
     content: Implement `views::{modules, functions, stats, wit_types, policy_effective}` as SRF table functions backed by catalog rows and shmem atomics. Add grants so `pg_wasm_reader` can read `stats()`. Add regress tests asserting counter shape and monotonicity.
     status: completed
@@ -187,9 +186,9 @@ isProject: false
 
 ## Current state
 
-- Workspace with [Cargo.toml](../../Cargo.toml) and [pg_wasm/Cargo.toml](../../pg_wasm/Cargo.toml); pgrx 0.18; PG 13–18 feature flags.
-- [pg_wasm/src/lib.rs](../../pg_wasm/src/lib.rs) is the minimal `hello_pg_wasm` stub plus the pgrx test scaffolding.
-- Prior v1 experiment (see branch `origin/v1`) explored Wasmtime + Extism with buffer-style ABI and explicit `exports` hints; v2 narrows to **Wasmtime + Component Model (WIT)** with automatic UDT registration.
+- Workspace with [Cargo.toml](../../Cargo.toml) and [pg_wasm/Cargo.toml](../../pg_wasm/Cargo.toml); pgrx 0.18; PG 17 default feature with PG 13–18 feature flags available.
+- [pg_wasm/src/lib.rs](../../pg_wasm/src/lib.rs) wires the v2 extension modules, pgrx entry points, and in-backend tests; the implementation follows the module layout below.
+- Prior v1 experiment (see branch `origin/v1`) explored Wasmtime + Extism with buffer-style ABI and explicit `exports` hints; v2 is **Wasmtime + Component Model (WIT)** with automatic UDT registration.
 
 The authoritative architectural design is in [`docs/architecture.md`](../../docs/architecture.md); this plan is the execution roadmap against that design.
 
