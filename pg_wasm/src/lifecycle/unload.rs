@@ -9,6 +9,7 @@ use pgrx::spi::{self, Spi};
 use crate::artifacts;
 use crate::catalog::{exports, modules, wit_types};
 use crate::errors::{PgWasmError, Result};
+use crate::hooks;
 use crate::proc_reg;
 use crate::runtime::pool;
 use crate::shmem;
@@ -38,6 +39,8 @@ pub(crate) fn unload_impl(module_name: &str, cascade: bool) -> Result<bool> {
     let module_id = module.module_id;
     let module_id_u64 = u64::try_from(module_id)
         .map_err(|_| PgWasmError::Internal("module_id does not fit u64".to_string()))?;
+
+    let _ = hooks::on_unload(module_id_u64);
 
     try_on_unload_notice(module_id)?;
 
@@ -154,14 +157,6 @@ fn try_on_unload_notice(module_id: i64) -> Result<()> {
         return Ok(());
     }
 
-    // TODO(wave-4: hooks): invoke `hooks::on_unload` when wired; failures must be logged only.
-    ereport!(
-        PgLogLevel::NOTICE,
-        PgSqlErrorCode::ERRCODE_SUCCESSFUL_COMPLETION,
-        format!(
-            "pg_wasm: module exports `{ON_UNLOAD_WASM_NAME}`; hook invocation is not implemented yet (TODO wave-4: hooks)"
-        ),
-    );
     Ok(())
 }
 

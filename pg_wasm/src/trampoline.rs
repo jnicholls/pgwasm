@@ -1,14 +1,13 @@
 //! Trampoline entrypoint dispatch helpers.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 use pgrx::FromDatum;
 use pgrx::fcinfo::{pg_arg_is_null, pg_get_nullable_datum, pg_getarg_type};
 use pgrx::pg_guard;
 use pgrx::pg_sys::{self, Datum, FunctionCallInfo, Oid, Pg_finfo_record};
 use pgrx::prelude::PgLogLevel;
-use wasmtime::component::{Component, Val};
+use wasmtime::component::Val;
 use wasmtime::{Store, StoreLimits, StoreLimitsBuilder};
 
 use crate::artifacts;
@@ -21,15 +20,9 @@ use crate::registry;
 use crate::runtime::component::{self, StoreCtx};
 use crate::runtime::core;
 use crate::runtime::engine;
-use crate::runtime::pool::{InstancePool, PooledInstance};
+use crate::runtime::pool;
 use crate::shmem::{self, ExportCounterKind};
 use crate::wit::typing::{PgType, TypePlan};
-
-static MODULE_POOLS: OnceLock<Mutex<HashMap<u64, Arc<InstancePool>>>> = OnceLock::new();
-
-fn module_pools() -> &'static Mutex<HashMap<u64, Arc<InstancePool>>> {
-    MODULE_POOLS.get_or_init(|| Mutex::new(HashMap::new()))
-}
 
 #[pg_guard]
 #[unsafe(no_mangle)]
@@ -127,34 +120,6 @@ fn resolve_export_for_fn_oid(fn_oid: Oid) -> Result<exports::ExportRow, PgWasmEr
     Err(PgWasmError::NotFound(format!(
         "no wasm export registered for fn_oid {fn_oid}"
     )))
-}
-
-fn acquire_pooled(
-    module_id: u64,
-    component: Arc<Component>,
-    wasm_engine: &wasmtime::Engine,
-    effective: &EffectivePolicy,
-) -> Result<PooledInstance, PgWasmError> {
-    let mut map = module_pools()
-        .lock()
-        .map_err(|_| PgWasmError::Internal("module pool map mutex poisoned".to_string()))?;
-
-    let pool = match map.get(&module_id) {
-        Some(existing) => Arc::clone(existing),
-        None => {
-            let linker = component::build_linker(wasm_engine, effective)?;
-            let pool = Arc::new(InstancePool::new(
-                module_id,
-                Arc::clone(&component),
-                linker,
-                effective,
-            )?);
-            map.insert(module_id, Arc::clone(&pool));
-            pool
-        }
-    };
-
-    pool.acquire(wasm_engine, effective)
 }
 
 fn epoch_tick_ms() -> u64 {
@@ -301,7 +266,8 @@ fn invoke_component_export(
         None
     };
 
-    let mut pooled = acquire_pooled(module_id, Arc::clone(&component), wasm_engine, effective)?;
+    let mut pooled =
+        pool::acquire_pooled(module_id, Arc::clone(&component), wasm_engine, effective)?;
     let (instance, store) = pooled
         .instance_and_store_mut()
         .ok_or_else(|| PgWasmError::Internal("pooled wasm instance missing slot".to_string()))?;
