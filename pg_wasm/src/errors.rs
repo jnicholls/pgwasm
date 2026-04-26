@@ -28,6 +28,8 @@ pub(crate) fn map_wasmtime_err(e: wasmtime::Error) -> PgWasmError {
 pub(crate) enum PgWasmError {
     #[error("pg_wasm is disabled")]
     Disabled,
+    #[error("reload rejected a breaking change")]
+    BreakingChangeReload { detail: String, hint: String },
     #[error("permission denied: {0}")]
     PermissionDenied(String),
     #[error("invalid configuration: {0}")]
@@ -55,6 +57,11 @@ pub(crate) enum PgWasmError {
 impl PgWasmError {
     pub(crate) fn into_error_report(self) -> ErrorReport {
         match self {
+            Self::BreakingChangeReload { detail, hint } => ErrorReport::new(
+                PgSqlErrorCode::ERRCODE_INVALID_PARAMETER_VALUE,
+                format!("invalid configuration: reload rejected: {detail} — {hint}"),
+                "pg_wasm",
+            ),
             Self::Trap { kind } => ErrorReport::new(
                 PgSqlErrorCode::ERRCODE_EXTERNAL_ROUTINE_EXCEPTION,
                 "WebAssembly trap".to_string(),
@@ -68,6 +75,7 @@ impl PgWasmError {
     pub(crate) const fn sqlstate(&self) -> PgSqlErrorCode {
         match self {
             Self::Disabled => PgSqlErrorCode::ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE,
+            Self::BreakingChangeReload { .. } => PgSqlErrorCode::ERRCODE_INVALID_PARAMETER_VALUE,
             Self::PermissionDenied(_) => PgSqlErrorCode::ERRCODE_INSUFFICIENT_PRIVILEGE,
             Self::InvalidConfiguration(_) => PgSqlErrorCode::ERRCODE_INVALID_PARAMETER_VALUE,
             Self::InvalidModule(_) => PgSqlErrorCode::ERRCODE_INVALID_BINARY_REPRESENTATION,

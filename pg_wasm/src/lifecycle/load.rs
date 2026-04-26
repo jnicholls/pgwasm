@@ -15,7 +15,7 @@ use wit_parser::{Function, FunctionKind, Type, WorldItem, WorldKey};
 
 use crate::abi::{self, Abi, AbiOverride};
 use crate::artifacts;
-use crate::catalog::{exports, modules};
+use crate::catalog::{exports, modules, wit_types};
 use crate::config::{Abi as OptionsAbi, LoadOptions, PolicyOverrides};
 use crate::errors::{PgWasmError, Result};
 use crate::guc;
@@ -25,9 +25,11 @@ use crate::runtime::component;
 use crate::runtime::core as runtime_core;
 use crate::runtime::engine;
 use crate::shmem;
-use crate::wit::typing::{self, TypePlan};
+use crate::wit::typing;
 use crate::wit::udt;
 use crate::wit::world;
+
+use super::reload;
 
 const ON_LOAD_WASM_NAME: &str = "on-load";
 const SCHEMA_WASM: &str = "wasm";
@@ -53,13 +55,13 @@ pub(crate) fn load_impl(
     let opts = parse_load_options(options)?;
     if modules::get_by_name(module_name)?.is_some() {
         if opts.replace_exports {
-            // TODO(wave-5: reload-orchestration): delegate to `lifecycle::reload` when implemented.
             return Err(PgWasmError::InvalidConfiguration(
-                "module already loaded; replacing exports requires `pg_wasm.reload(...)` (not yet implemented — see wave-5 reload-orchestration)".to_string(),
+                "module already loaded; use `pg_wasm.reload(...)` to replace exports in place"
+                    .to_string(),
             ));
         }
         return Err(PgWasmError::InvalidConfiguration(format!(
-            "module `{module_name}` already exists in catalog; set options.replace_exports and call `pg_wasm.reload(...)` when available"
+            "module `{module_name}` already exists in catalog; use `pg_wasm.reload(...)` or unload first"
         )));
     }
 
@@ -163,7 +165,6 @@ fn load_component_path(
     let decoded = world::decode(bytes)?;
     let wit_text = decoded.wit_text.clone();
     let type_plan = typing::plan_types(module_name, &decoded)?;
-    let export_specs = plan_export_proc_specs(module_name, &decoded, &type_plan)?;
 
     let wasm_engine = engine::try_shared_engine()?;
     let _compiled = component::compile(wasm_engine, bytes)?;
@@ -196,6 +197,9 @@ fn load_component_path(
     // scoped `AbortSub` hook must not run cleanup until the module directory is populated.
     register_abort_artifact_cleanup(module_id_u64);
 
+    let _registered_types = udt::register_type_plan(&type_plan, module_id_u64, extension_oid)?;
+
+    let export_specs = plan_export_proc_specs(module_name, module_id, &decoded)?;
     let mut export_rows: Vec<exports::NewExport> = Vec::new();
     for (spec, wasm_export) in export_specs {
         let fn_oid = proc_reg::register(&spec, extension_oid, opts.replace_exports)?;
@@ -221,8 +225,6 @@ fn load_component_path(
     for row in &export_rows {
         exports::insert(row)?;
     }
-
-    let _registered_types = udt::register_type_plan(&type_plan, module_id_u64, extension_oid)?;
 
     let artifact_path = cwasm_path.display().to_string();
     let updated = modules::NewModule {
@@ -783,8 +785,8 @@ fn export_signature_json(decoded: &world::DecodedWorld, wasm_export: &str) -> Re
 
 fn plan_export_proc_specs(
     module_prefix: &str,
+    module_id: i64,
     decoded: &world::DecodedWorld,
-    _type_plan: &TypePlan,
 ) -> Result<Vec<(ProcSpec, String)>> {
     let world = decoded
         .resolve
@@ -799,7 +801,13 @@ fn plan_export_proc_specs(
             WorldItem::Function(f) => {
                 let wasm = export_wasm_name(&decoded.resolve, f);
                 out.push((
-                    proc_spec_for_function(module_prefix, &export_key_str, f, &decoded.resolve)?,
+                    proc_spec_for_function(
+                        module_prefix,
+                        &export_key_str,
+                        f,
+                        module_id,
+                        &decoded.resolve,
+                    )?,
                     wasm,
                 ));
             }
@@ -811,7 +819,13 @@ fn plan_export_proc_specs(
                     let sql_key = format!("{export_key_str}/{func_key}");
                     let wasm = export_wasm_name(&decoded.resolve, func);
                     out.push((
-                        proc_spec_for_function(module_prefix, &sql_key, func, &decoded.resolve)?,
+                        proc_spec_for_function(
+                            module_prefix,
+                            &sql_key,
+                            func,
+                            module_id,
+                            &decoded.resolve,
+                        )?,
                         wasm,
                     ));
                 }
@@ -821,7 +835,7 @@ fn plan_export_proc_specs(
     }
 
     out.sort_by(|a, b| a.0.name.cmp(&b.0.name));
-    Ok(out)
+    reload::dedupe_exports_by_wasm_name(out)
 }
 
 fn world_key_to_string(key: &WorldKey) -> String {
@@ -835,17 +849,18 @@ fn proc_spec_for_function(
     module_prefix: &str,
     export_key: &str,
     func: &Function,
-    _resolve: &wit_parser::Resolve,
+    module_id: i64,
+    resolve: &wit_parser::Resolve,
 ) -> Result<ProcSpec> {
     let sql_name = sanitize_sql_identifier(export_key);
     let full_name = format!("{module_prefix}__{sql_name}");
     let mut arg_types = Vec::new();
     for p in &func.params {
-        arg_types.push(wit_scalar_to_pg_oid(&p.ty)?);
+        arg_types.push(wit_wasm_type_to_pg_oid(&p.ty, module_id, resolve)?);
     }
     let ret_type = match &func.result {
         None => pg_sys::VOIDOID,
-        Some(t) => wit_scalar_to_pg_oid(t)?,
+        Some(t) => wit_wasm_type_to_pg_oid(t, module_id, resolve)?,
     };
     let strict = func.params.iter().any(|p| matches!(p.ty, Type::Id(_)));
 
@@ -864,12 +879,25 @@ fn proc_spec_for_function(
     })
 }
 
-fn wit_scalar_to_pg_oid(ty: &Type) -> Result<pg_sys::Oid> {
+fn wit_wasm_type_to_pg_oid(
+    ty: &Type,
+    module_id: i64,
+    resolve: &wit_parser::Resolve,
+) -> Result<pg_sys::Oid> {
     match ty {
         Type::Bool => Ok(pg_sys::BOOLOID),
         Type::S32 => Ok(pg_sys::INT4OID),
         Type::S64 => Ok(pg_sys::INT8OID),
         Type::String => Ok(pg_sys::TEXTOID),
+        Type::Id(type_id) => {
+            let key = typing::export_type_key_for_id(resolve, *type_id)?;
+            let row = wit_types::get_by_module_and_type_key(module_id, &key)?.ok_or_else(|| {
+                PgWasmError::Internal(format!(
+                    "WIT type `{key}` is not registered in catalog; register UDTs before exports"
+                ))
+            })?;
+            Ok(row.pg_type_oid)
+        }
         other => Err(PgWasmError::Unsupported(format!(
             "WIT type `{other:?}` is not supported for automatic SQL export registration in this build"
         ))),
