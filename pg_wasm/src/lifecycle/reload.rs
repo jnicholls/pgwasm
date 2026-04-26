@@ -312,40 +312,46 @@ fn reload_component(
         opts.breaking_changes_allowed,
     )?;
 
-    apply_export_changes(
-        module_id,
-        extension_oid,
-        opts,
-        &old_exports,
-        &new_specs,
-        &decoded,
-    )?;
-
     let cwasm_path = artifacts::module_cwasm_path(module_id_u64)?;
-    let precompile_hash = component::precompile_to(wasm_engine, bytes, &cwasm_path)?;
-    let wasm_dir = artifacts::module_dir(module_id_u64)?;
-    artifacts::write_checksum(&wasm_dir, wasm_sha256_bytes)?;
-
     let next_generation = module_row.generation.saturating_add(1);
-    let updated = modules::NewModule {
-        abi: "component".to_string(),
-        artifact_path: cwasm_path.display().to_string(),
-        digest: wasm_sha256_bytes.to_vec(),
-        generation: next_generation,
-        limits: limits_json,
-        name: module_name.to_string(),
-        origin: module_row.origin.clone(),
-        policy: policy_json,
-        wasm_sha256: precompile_hash.to_vec(),
-        wit_world: wit_text,
-    };
-    let Some(_row) = modules::update(module_id, &updated)? else {
-        return Err(PgWasmError::Internal(
-            "catalog update after reload returned no row".to_string(),
-        ));
-    };
+    let wasm_dir = artifacts::module_dir(module_id_u64)?;
 
-    finish_reload(module_id_u64, module_id, effective)?;
+    // CatalogLock: export SPI + precompile + module row must not interleave with invocations that
+    // `load_precompiled` the cwasm path (a gap between SPI and `precompile_to` produced ENOENT).
+    shmem::with_catalog_lock_exclusive(|| -> Result<()> {
+        apply_export_changes(
+            module_id,
+            extension_oid,
+            opts,
+            &old_exports,
+            &new_specs,
+            &decoded,
+        )?;
+
+        let precompile_hash = component::precompile_to(wasm_engine, bytes, &cwasm_path)?;
+        artifacts::write_checksum(&wasm_dir, wasm_sha256_bytes)?;
+
+        let updated = modules::NewModule {
+            abi: "component".to_string(),
+            artifact_path: cwasm_path.display().to_string(),
+            digest: wasm_sha256_bytes.to_vec(),
+            generation: next_generation,
+            limits: limits_json,
+            name: module_name.to_string(),
+            origin: module_row.origin.clone(),
+            policy: policy_json,
+            wasm_sha256: precompile_hash.to_vec(),
+            wit_world: wit_text,
+        };
+        let Some(_row) = modules::update(module_id, &updated)? else {
+            return Err(PgWasmError::Internal(
+                "catalog update after reload returned no row".to_string(),
+            ));
+        };
+        Ok(())
+    })?;
+
+    finish_reload_after_catalog_commit(module_id_u64, module_id, effective)?;
 
     Ok(true)
 }
@@ -392,7 +398,10 @@ fn reload_core(
     artifacts::write_checksum(&wasm_dir, wasm_sha256_bytes)?;
     register_artifact_rollback(snapshot, paths);
 
-    apply_export_changes_core(module_id, extension_oid, opts, &old_exports, &new_specs)?;
+    // CatalogLock: export SPI for core reload only.
+    shmem::with_catalog_lock_exclusive(|| -> Result<()> {
+        apply_export_changes_core(module_id, extension_oid, opts, &old_exports, &new_specs)
+    })?;
 
     let wasm_path = artifacts::module_wasm_path(module_id_u64)?;
     let next_generation = module_row.generation.saturating_add(1);
@@ -408,18 +417,25 @@ fn reload_core(
         wasm_sha256: wasm_sha256_bytes.to_vec(),
         wit_world: String::new(),
     };
-    let Some(_row) = modules::update(module_id, &updated)? else {
-        return Err(PgWasmError::Internal(
-            "catalog update after core reload returned no row".to_string(),
-        ));
-    };
+    shmem::with_catalog_lock_exclusive(|| -> Result<()> {
+        let Some(_row) = modules::update(module_id, &updated)? else {
+            return Err(PgWasmError::Internal(
+                "catalog update after core reload returned no row".to_string(),
+            ));
+        };
+        Ok(())
+    })?;
 
-    finish_reload(module_id_u64, module_id, effective)?;
+    finish_reload_after_catalog_commit(module_id_u64, module_id, effective)?;
 
     Ok(true)
 }
 
-fn finish_reload(module_id_u64: u64, module_id: i64, effective: &EffectivePolicy) -> Result<()> {
+fn finish_reload_after_catalog_commit(
+    module_id_u64: u64,
+    module_id: i64,
+    effective: &EffectivePolicy,
+) -> Result<()> {
     pool::drain(module_id_u64)?;
 
     if exports::get_by_module_and_wasm_name(module_id, ON_RECONFIGURE_WASM_NAME)?.is_some() {

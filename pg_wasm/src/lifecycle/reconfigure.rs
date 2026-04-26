@@ -65,11 +65,15 @@ pub(crate) fn reconfigure_impl(
         wit_world: module.wit_world.clone(),
     };
 
-    let Some(_row) = modules::update(module.module_id, &updated)? else {
-        return Err(PgWasmError::Internal(
-            "catalog update returned no row for existing module".to_string(),
-        ));
-    };
+    // CatalogLock: `wasm.modules` SPI update only; generation bump after (same LWLock as `bump_generation`).
+    shmem::with_catalog_lock_exclusive(|| -> Result<()> {
+        let Some(_row) = modules::update(module.module_id, &updated)? else {
+            return Err(PgWasmError::Internal(
+                "catalog update returned no row for existing module".to_string(),
+            ));
+        };
+        Ok(())
+    })?;
 
     shmem::bump_generation(module.module_id as u64);
 

@@ -154,7 +154,7 @@ todos:
     status: pending
   - id: concurrency-safety
     content: Add `pg_wasm.CatalogLock` (LWLock tranche) held during load/unload/reload/reconfigure catalog mutation and shmem generation bumps. Confirm in-flight invocations complete against the old handle under reload. Stress-test with an integration test issuing concurrent loads + calls.
-    status: pending
+    status: completed
   - id: pg_upgrade-and-extension-upgrade
     content: |
       Verify artifacts survive `pg_upgrade`. Implement the

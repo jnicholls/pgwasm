@@ -50,38 +50,43 @@ pub(crate) fn unload_impl(module_name: &str, cascade: bool) -> Result<bool> {
         )));
     }
 
-    let export_rows = exports::list_by_module(module_id)?;
-    for row in &export_rows {
-        if let Some(fn_oid) = row.fn_oid
-            && fn_oid != pg_sys::InvalidOid
-        {
-            proc_reg::unregister(fn_oid)?;
+    // CatalogLock: SPI catalog teardown (pg_proc / types / wasm.* rows). Post-commit work keeps
+    // `bump_generation` / `free_slots` outside so they do not nest the same LWLock.
+    shmem::with_catalog_lock_exclusive(|| -> Result<()> {
+        let export_rows = exports::list_by_module(module_id)?;
+        for row in &export_rows {
+            if let Some(fn_oid) = row.fn_oid
+                && fn_oid != pg_sys::InvalidOid
+            {
+                proc_reg::unregister(fn_oid)?;
+            }
         }
-    }
 
-    for row in &export_rows {
-        let _ = exports::delete(row.export_id)?;
-    }
+        for row in &export_rows {
+            let _ = exports::delete(row.export_id)?;
+        }
 
-    // `RemoveFunctionById` does not advance the global command counter; SPI `DROP TYPE` can still
-    // consult stale syscache entries and fail with "cache lookup failed for function" when
-    // resolving dependent objects. Match PostgreSQL's pattern after DDL that removes `pg_proc`.
-    unsafe {
-        pg_sys::CommandCounterIncrement();
-    }
+        // `RemoveFunctionById` does not advance the global command counter; SPI `DROP TYPE` can still
+        // consult stale syscache entries and fail with "cache lookup failed for function" when
+        // resolving dependent objects. Match PostgreSQL's pattern after DDL that removes `pg_proc`.
+        unsafe {
+            pg_sys::CommandCounterIncrement();
+        }
 
-    let wit_rows = wit_types::list_by_module(module_id)?;
-    for row in &wit_rows {
-        drop_wit_type_oid(row.pg_type_oid, cascade)?;
-        let _ = wit_types::delete(row.wit_type_id)?;
-    }
+        let wit_rows = wit_types::list_by_module(module_id)?;
+        for row in &wit_rows {
+            drop_wit_type_oid(row.pg_type_oid, cascade)?;
+            let _ = wit_types::delete(row.wit_type_id)?;
+        }
 
-    let deleted = modules::delete(module_id)?;
-    if !deleted {
-        return Err(PgWasmError::Internal(
-            "unload removed catalog rows but modules::delete reported no row".to_string(),
-        ));
-    }
+        let deleted = modules::delete(module_id)?;
+        if !deleted {
+            return Err(PgWasmError::Internal(
+                "unload removed catalog rows but modules::delete reported no row".to_string(),
+            ));
+        }
+        Ok(())
+    })?;
 
     let active_for_prune = active_module_ids()?;
     register_post_commit_cleanup(module_id_u64, active_for_prune);
@@ -123,12 +128,15 @@ pub(crate) fn force_cleanup_orphaned_module_impl(module_name: &str, cascade: boo
     // `fn_oid` values whose `pg_proc` rows are already gone; `RemoveFunctionById` then errors with
     // `cache lookup failed for function`. Bulk-delete catalog children so `modules::delete` cannot
     // be blocked by leftover FK rows or failed per-row SPI deletes.
-    let wit_rows = wit_types::list_by_module(module_id)?;
-    for row in &wit_rows {
-        let _ = drop_wit_type_oid(row.pg_type_oid, cascade);
-    }
+    // CatalogLock: bulk-delete catalog tree for orphan recovery (SPI).
+    let deleted = shmem::with_catalog_lock_exclusive(|| -> Result<bool> {
+        let wit_rows = wit_types::list_by_module(module_id)?;
+        for row in &wit_rows {
+            let _ = drop_wit_type_oid(row.pg_type_oid, cascade);
+        }
 
-    let deleted = modules::delete_module_tree_for_orphan_recovery(module_id)?;
+        modules::delete_module_tree_for_orphan_recovery(module_id)
+    })?;
     if deleted {
         let active_for_prune = active_module_ids().unwrap_or_default();
         register_post_commit_cleanup(module_id_u64, active_for_prune);

@@ -181,7 +181,8 @@ fn load_component_path(
         wasm_sha256: wasm_sha256_bytes.to_vec(),
         wit_world: wit_text.clone(),
     };
-    let inserted = modules::insert(&placeholder)?;
+    // CatalogLock: reserve `wasm.modules` row (SPI) only; compile and filesystem work stay outside.
+    let inserted = shmem::with_catalog_lock_exclusive(|| modules::insert(&placeholder))?;
     let module_id = inserted.module_id;
     let module_id_u64 = u64::try_from(module_id)
         .map_err(|_| PgWasmError::Internal("module_id does not fit u64".to_string()))?;
@@ -222,10 +223,6 @@ fn load_component_path(
         });
     }
 
-    for row in &export_rows {
-        exports::insert(row)?;
-    }
-
     let artifact_path = cwasm_path.display().to_string();
     let updated = modules::NewModule {
         abi: "component".to_string(),
@@ -239,11 +236,19 @@ fn load_component_path(
         wasm_sha256: precompile_hash.to_vec(),
         wit_world: wit_text,
     };
-    let Some(_row) = modules::update(module_id, &updated)? else {
-        return Err(PgWasmError::Internal(
-            "catalog update after load returned no row".to_string(),
-        ));
-    };
+    // CatalogLock: export rows + final module row (SPI). `bump_generation` acquires the same LWLock
+    // and must run only after this guard is dropped (LWLock is not re-entrant).
+    shmem::with_catalog_lock_exclusive(|| -> Result<()> {
+        for row in &export_rows {
+            exports::insert(row)?;
+        }
+        let Some(_row) = modules::update(module_id, &updated)? else {
+            return Err(PgWasmError::Internal(
+                "catalog update after load returned no row".to_string(),
+            ));
+        };
+        Ok(())
+    })?;
 
     if world_exports_function_named(&decoded, ON_LOAD_WASM_NAME) {
         return Err(PgWasmError::InvalidConfiguration(
@@ -284,7 +289,8 @@ fn load_core_path(
         wasm_sha256: wasm_sha256_bytes.to_vec(),
         wit_world: String::new(),
     };
-    let inserted = modules::insert(&placeholder)?;
+    // CatalogLock: reserve module row only; core compile stays outside the lock.
+    let inserted = shmem::with_catalog_lock_exclusive(|| modules::insert(&placeholder))?;
     let module_id = inserted.module_id;
     let module_id_u64 = u64::try_from(module_id)
         .map_err(|_| PgWasmError::Internal("module_id does not fit u64".to_string()))?;
@@ -315,10 +321,6 @@ fn load_core_path(
         });
     }
 
-    for row in &export_rows {
-        exports::insert(row)?;
-    }
-
     let wasm_path = artifacts::module_wasm_path(module_id_u64)?;
     let updated = modules::NewModule {
         abi: "core".to_string(),
@@ -332,11 +334,18 @@ fn load_core_path(
         wasm_sha256: wasm_sha256_bytes.to_vec(),
         wit_world: String::new(),
     };
-    let Some(_row) = modules::update(module_id, &updated)? else {
-        return Err(PgWasmError::Internal(
-            "catalog update after core load returned no row".to_string(),
-        ));
-    };
+    // CatalogLock: exports + final module row. Bump generation after the guard drops.
+    shmem::with_catalog_lock_exclusive(|| -> Result<()> {
+        for row in &export_rows {
+            exports::insert(row)?;
+        }
+        let Some(_row) = modules::update(module_id, &updated)? else {
+            return Err(PgWasmError::Internal(
+                "catalog update after core load returned no row".to_string(),
+            ));
+        };
+        Ok(())
+    })?;
 
     shmem::bump_generation(module_id_u64);
 
