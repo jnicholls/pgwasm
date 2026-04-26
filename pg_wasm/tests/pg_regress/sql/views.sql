@@ -4,9 +4,6 @@
 SELECT set_config('pg_wasm.fuel_enabled', 'off', false);
 SELECT set_config('pg_wasm.invocation_deadline_ms', '0', false);
 
--- Clear stale module slots from prior regress / `#[pg_test]` runs (shmem survives `DROP DATABASE`).
-SELECT wasm.test_scrub_shmem_slots(1, 20000) AS scrubbed_slots;
-
 -- Seed a minimal module + export (superuser bypasses wasm_loader for INSERT).
 INSERT INTO wasm.modules (
     module_id,

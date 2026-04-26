@@ -88,7 +88,12 @@ pub(crate) fn unload_impl(module_name: &str, cascade: bool) -> Result<bool> {
         Ok(())
     })?;
 
-    let active_for_prune = active_module_ids()?;
+    // `prune_stale` removes module dirs not listed in `active_ids`. After the catalog row is
+    // gone, `active_module_ids()` no longer includes this `module_id`, which would prune the
+    // on-disk tree immediately (while the surrounding transaction may still roll back). Keep
+    // the unloaded id in the set until post-commit work runs `remove_dir_all` for it explicitly.
+    let mut active_for_prune = active_module_ids()?;
+    active_for_prune.insert(module_id_u64);
     register_post_commit_cleanup(module_id_u64, active_for_prune);
 
     Ok(true)
@@ -138,7 +143,8 @@ pub(crate) fn force_cleanup_orphaned_module_impl(module_name: &str, cascade: boo
         modules::delete_module_tree_for_orphan_recovery(module_id)
     })?;
     if deleted {
-        let active_for_prune = active_module_ids().unwrap_or_default();
+        let mut active_for_prune = active_module_ids().unwrap_or_default();
+        active_for_prune.insert(module_id_u64);
         register_post_commit_cleanup(module_id_u64, active_for_prune);
     }
 

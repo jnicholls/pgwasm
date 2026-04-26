@@ -151,7 +151,7 @@ todos:
     status: completed
   - id: error-mapping
     content: Finalize `errors::PgWasmError` -> `ereport` conversion, including SQLSTATE, MESSAGE, DETAIL (module_id, export_id, wasmtime_version), HINT (policy hints on denials).
-    status: pending
+    status: completed
   - id: concurrency-safety
     content: Add `pg_wasm.CatalogLock` (LWLock tranche) held during load/unload/reload/reconfigure catalog mutation and shmem generation bumps. Confirm in-flight invocations complete against the old handle under reload. Stress-test with an integration test issuing concurrent loads + calls.
     status: completed

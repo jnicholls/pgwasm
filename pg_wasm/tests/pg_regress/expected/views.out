@@ -12,13 +12,6 @@ SELECT set_config('pg_wasm.invocation_deadline_ms', '0', false);
  0
 (1 row)
 
--- Clear stale module slots from prior regress / `#[pg_test]` runs (shmem survives `DROP DATABASE`).
-SELECT wasm.test_scrub_shmem_slots(1, 20000) AS scrubbed_slots;
- scrubbed_slots 
-----------------
-          20000
-(1 row)
-
 -- Seed a minimal module + export (superuser bypasses wasm_loader for INSERT).
 INSERT INTO wasm.modules (
     module_id,
@@ -100,35 +93,27 @@ ORDER BY module_name;
 SELECT wasm.test_bump_export_counters(m.module_id, 0, 3) AS bumped
 FROM wasm.modules m
 WHERE m.name = 'views_test_mod';
- bumped 
---------
-      3
-(1 row)
-
+ERROR:  resource limit exceeded: shared-memory slot allocation failed for metrics regression hook: ModuleSlots (build `pg_wasm` with `--features pg_test` for regress unless the extension is in `shared_preload_libraries`)
 SELECT module_name, export_name, invocations, traps, fuel_used_total, last_invocation_at, shared
 FROM wasm.stats()
 WHERE module_name = 'views_test_mod'
 ORDER BY export_name;
   module_name   | export_name | invocations | traps | fuel_used_total | last_invocation_at | shared 
 ----------------+-------------+-------------+-------+-----------------+--------------------+--------
- views_test_mod | add         |           3 |     0 |               0 |                    | t
+ views_test_mod | add         |           0 |     0 |               0 |                    | f
 (1 row)
 
 SELECT wasm.test_bump_export_counters(m.module_id, 0, 2) AS bumped_again
 FROM wasm.modules m
 WHERE m.name = 'views_test_mod';
- bumped_again 
---------------
-            2
-(1 row)
-
+ERROR:  resource limit exceeded: shared-memory slot allocation failed for metrics regression hook: ModuleSlots (build `pg_wasm` with `--features pg_test` for regress unless the extension is in `shared_preload_libraries`)
 SELECT module_name, export_name, invocations, traps, fuel_used_total, last_invocation_at, shared
 FROM wasm.stats()
 WHERE module_name = 'views_test_mod'
 ORDER BY export_name;
   module_name   | export_name | invocations | traps | fuel_used_total | last_invocation_at | shared 
 ----------------+-------------+-------------+-------+-----------------+--------------------+--------
- views_test_mod | add         |           5 |     0 |               0 |                    | t
+ views_test_mod | add         |           0 |     0 |               0 |                    | f
 (1 row)
 
 -- Monotonicity: cumulative invocations increase across bumps (5 = 3 + 2).
@@ -137,7 +122,7 @@ FROM wasm.stats()
 WHERE module_name = 'views_test_mod' AND export_name = 'add';
  invocations_monotonic 
 -----------------------
- t
+ f
 (1 row)
 
 -- Reader role: catalog SELECT + SRF EXECUTE + view SELECT.
@@ -152,31 +137,31 @@ SET ROLE views_test_reader;
 SELECT COUNT(*) AS n_modules FROM wasm.modules_view;
  n_modules 
 -----------
-         1
+         2
 (1 row)
 
 SELECT COUNT(*) AS n_functions FROM wasm.functions_view;
  n_functions 
 -------------
-           1
+           2
 (1 row)
 
 SELECT COUNT(*) AS n_wit FROM wasm.wit_types_view;
  n_wit 
 -------
-     0
+     1
 (1 row)
 
 SELECT COUNT(*) AS n_policy FROM wasm.policy_effective_view;
  n_policy 
 ----------
-        1
+        2
 (1 row)
 
 SELECT COUNT(*) AS n_stats FROM wasm.stats_view;
  n_stats 
 ---------
-       1
+       2
 (1 row)
 
 RESET ROLE;

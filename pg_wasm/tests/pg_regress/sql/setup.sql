@@ -1,3 +1,5 @@
 -- this setup file is run immediately after the regression database is (re)created
 -- the file is optional but you likely want to create the extension
 CREATE EXTENSION pg_wasm;
+-- Shared-memory module slots survive `DROP DATABASE` in the same cluster; scrub before each suite.
+SELECT wasm.test_scrub_shmem_slots(1, 20000) AS regress_setup_scrubbed_slots;

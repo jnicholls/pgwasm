@@ -6,7 +6,7 @@ use pgrx::prelude::*;
 use pgrx::spi::{self, Spi, SpiHeapTupleData};
 use serde_json::Value;
 
-use crate::errors::{PgWasmError, Result};
+use crate::errors::{ErrorContext, PgWasmError, Result};
 
 const CATALOG_SCHEMA: &str = "wasm";
 
@@ -841,8 +841,7 @@ pub(crate) mod migrations {
 
     fn fail_invalid_configuration(message: String) -> ! {
         let error = PgWasmError::InvalidConfiguration(message);
-        ereport!(PgLogLevel::ERROR, error.sqlstate(), error.to_string());
-        unreachable!("ereport! should not return");
+        error.report(ErrorContext::default());
     }
 }
 

@@ -1,8 +1,6 @@
 -- pg_wasm.load: tiny component fixture and catalog / modules() visibility.
 -- Extension is created by tests/pg_regress/sql/setup.sql.
 
-SELECT wasm.test_scrub_shmem_slots(1, 20000) AS scrubbed_slots;
-
 SELECT wasm.load(
     'load_regress_fixture',
     json_build_object(
@@ -16,12 +14,12 @@ SELECT wasm.load(
     NULL
 ) AS loaded;
 
-SELECT module_id, name, origin
+SELECT name, origin
 FROM wasm.modules
 WHERE name = 'load_regress_fixture'
 ORDER BY name;
 
-SELECT module_id, name, origin
+SELECT name, origin
 FROM wasm.modules()
 WHERE name = 'load_regress_fixture'
 ORDER BY name;

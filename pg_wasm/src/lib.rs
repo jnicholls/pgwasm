@@ -545,12 +545,11 @@ mod tests {
 
 // TODO(wave-4): replace with lifecycle::load — temporary regress hook for core scalar path.
 // Registered in the extension schema (`wasm` per pg_wasm.control); SQL calls `wasm._core_invoke_scalar`.
-#[cfg(feature = "pg_test")]
 mod core_invoke_regress {
     use pgrx::prelude::*;
     use wasmtime::Val;
 
-    use crate::errors::PgWasmError;
+    use crate::errors::{ErrorContext, IntoReport, PgWasmError};
     use crate::mapping::scalars;
     use crate::policy;
     use crate::runtime::core as runtime_core;
@@ -558,13 +557,7 @@ mod core_invoke_regress {
 
     #[pg_extern]
     pub fn _core_invoke_scalar(bytes: &[u8], export: &str, i32args: Vec<i32>) -> i32 {
-        match invoke_inner(bytes, export, &i32args) {
-            Ok(v) => v,
-            Err(err) => {
-                ereport!(PgLogLevel::ERROR, err.sqlstate(), err.to_string());
-                unreachable!("ereport should not return");
-            }
-        }
+        invoke_inner(bytes, export, &i32args).or_report(ErrorContext::default())
     }
 
     fn invoke_inner(bytes: &[u8], export: &str, i32args: &[i32]) -> Result<i32, PgWasmError> {

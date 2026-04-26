@@ -6,13 +6,12 @@ use pgrx::FromDatum;
 use pgrx::fcinfo::{pg_arg_is_null, pg_get_nullable_datum, pg_getarg_type};
 use pgrx::pg_guard;
 use pgrx::pg_sys::{self, Datum, FunctionCallInfo, Oid, Pg_finfo_record};
-use pgrx::prelude::PgLogLevel;
 use wasmtime::component::Val;
 use wasmtime::{Store, StoreLimits, StoreLimitsBuilder};
 
 use crate::artifacts;
 use crate::catalog::{exports, modules};
-use crate::errors::{PgWasmError, map_wasmtime_err};
+use crate::errors::{DEFAULT_WASMTIME_VERSION, ErrorContext, PgWasmError, map_wasmtime_err};
 use crate::guc;
 use crate::mapping::composite::{self, Export, ExportSlot, MarshalPlan, plan_marshaler};
 use crate::policy::{self, EffectivePolicy, GucSnapshot};
@@ -37,23 +36,34 @@ pub extern "C" fn pg_finfo_pg_wasm_udf_trampoline() -> &'static Pg_finfo_record 
     &V1_API
 }
 
-unsafe fn trampoline_impl(fcinfo: FunctionCallInfo) -> Datum {
-    match trampoline_inner(fcinfo) {
-        Ok(datum) => datum,
-        Err(err) => {
-            err.into_error_report().report(PgLogLevel::ERROR);
-            // SAFETY: `report(ERROR)` does not return to the caller.
-            unsafe { std::hint::unreachable_unchecked() }
-        }
+enum TrampolineReport {
+    Early(PgWasmError),
+    WithContext {
+        context: ErrorContext,
+        error: PgWasmError,
+    },
+}
+
+impl From<PgWasmError> for TrampolineReport {
+    fn from(error: PgWasmError) -> Self {
+        Self::Early(error)
     }
 }
 
-fn trampoline_inner(fcinfo: FunctionCallInfo) -> Result<Datum, PgWasmError> {
+unsafe fn trampoline_impl(fcinfo: FunctionCallInfo) -> Datum {
+    match trampoline_inner(fcinfo) {
+        Ok(datum) => datum,
+        Err(TrampolineReport::Early(error)) => error.report(ErrorContext::default()),
+        Err(TrampolineReport::WithContext { context, error }) => error.report(context),
+    }
+}
+
+fn trampoline_inner(fcinfo: FunctionCallInfo) -> Result<Datum, TrampolineReport> {
     let fn_oid = unsafe { fn_oid_from_fcinfo(fcinfo) };
     if fn_oid == Oid::INVALID {
-        return Err(PgWasmError::Internal(
-            "pg_wasm_udf_trampoline: missing fn_oid".to_string(),
-        ));
+        return Err(
+            PgWasmError::Internal("pg_wasm_udf_trampoline: missing fn_oid".to_string()).into(),
+        );
     }
 
     let export_row = resolve_export_for_fn_oid(fn_oid)?;
@@ -75,6 +85,12 @@ fn trampoline_inner(fcinfo: FunctionCallInfo) -> Result<Datum, PgWasmError> {
 
     let wasm_engine = engine::try_shared_engine()?;
 
+    let ctx = ErrorContext {
+        export_index: Some(export_index),
+        module_id: Some(module_id),
+        wasmtime_version: DEFAULT_WASMTIME_VERSION,
+    };
+
     if module_row.abi.eq_ignore_ascii_case("core") {
         invoke_core_export(
             fcinfo,
@@ -85,6 +101,10 @@ fn trampoline_inner(fcinfo: FunctionCallInfo) -> Result<Datum, PgWasmError> {
             wasm_engine,
             &effective,
         )
+        .map_err(|error| TrampolineReport::WithContext {
+            context: ctx,
+            error,
+        })
     } else {
         invoke_component_export(
             fcinfo,
@@ -95,6 +115,10 @@ fn trampoline_inner(fcinfo: FunctionCallInfo) -> Result<Datum, PgWasmError> {
             wasm_engine,
             &effective,
         )
+        .map_err(|error| TrampolineReport::WithContext {
+            context: ctx,
+            error,
+        })
     }
 }
 
@@ -993,6 +1017,10 @@ mod tests {
 
         let (sqlstate, _message, detail) = captured_sql_error(&fqfn, None);
         assert_eq!(sqlstate, "38000", "unexpected sqlstate {sqlstate}");
+        assert!(
+            detail.contains(&format!("module_id={mid_u64}")),
+            "expected module_id in DETAIL, got: {detail}"
+        );
         assert!(
             detail.to_lowercase().contains("unreachable"),
             "expected trap detail, got: {detail}"

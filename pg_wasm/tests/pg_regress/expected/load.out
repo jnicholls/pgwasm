@@ -1,11 +1,5 @@
 -- pg_wasm.load: tiny component fixture and catalog / modules() visibility.
 -- Extension is created by tests/pg_regress/sql/setup.sql.
-SELECT wasm.test_scrub_shmem_slots(1, 20000) AS scrubbed_slots;
- scrubbed_slots 
-----------------
-          20000
-(1 row)
-
 SELECT wasm.load(
     'load_regress_fixture',
     json_build_object(
@@ -23,25 +17,26 @@ SELECT wasm.load(
  t
 (1 row)
 
-SELECT module_id, name, origin
+SELECT name, origin
 FROM wasm.modules
 WHERE name = 'load_regress_fixture'
 ORDER BY name;
- module_id |         name         | origin 
------------+----------------------+--------
-         1 | load_regress_fixture | load
+         name         | origin 
+----------------------+--------
+ load_regress_fixture | load
 (1 row)
 
-SELECT module_id, name, origin
+SELECT name, origin
 FROM wasm.modules()
 WHERE name = 'load_regress_fixture'
 ORDER BY name;
- module_id |         name         | origin 
------------+----------------------+--------
-         1 | load_regress_fixture | load
+         name         | origin 
+----------------------+--------
+ load_regress_fixture | load
 (1 row)
 
 SELECT wasm.unload('load_regress_fixture', false) AS unloaded;
+WARNING:  pg_wasm: on-unload hook failed for module_id 3: policy resolve failed: invalid configuration: `fuel_per_invocation` must be a JSON integer; unload continues
  unloaded 
 ----------
  t

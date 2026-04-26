@@ -2,8 +2,6 @@
 -- Extension is created by tests/pg_regress/sql/setup.sql.
 -- WASM fixtures: wit-bindgen guests built for wasm32-wasip2 (component binaries).
 
-SELECT wasm.test_scrub_shmem_slots(1, 20000) AS scrubbed_slots;
-
 -- Best-effort cleanup so `cargo pgrx regress reload` is repeatable on a reused DB.
 -- If a prior `unload` failed mid-flight, `test_force_cleanup_stuck_module` (superuser) drops stale catalog rows.
 DO $rr_reload_init$

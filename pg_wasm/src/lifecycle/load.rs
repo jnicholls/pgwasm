@@ -53,19 +53,41 @@ pub(crate) fn load_impl(
     require_loader_or_superuser()?;
 
     let opts = parse_load_options(options)?;
-    if modules::get_by_name(module_name)?.is_some() {
+    if let Some(existing) = modules::get_by_name(module_name)? {
         if opts.replace_exports {
-            return Err(PgWasmError::InvalidConfiguration(
-                "module already loaded; use `pg_wasm.reload(...)` to replace exports in place"
+            return Err(PgWasmError::ModuleAlreadyLoaded {
+                module_id: existing.module_id,
+                msg: "module already loaded; use `pg_wasm.reload(...)` to replace exports in place"
                     .to_string(),
-            ));
+            });
         }
-        return Err(PgWasmError::InvalidConfiguration(format!(
-            "module `{module_name}` already exists in catalog; use `pg_wasm.reload(...)` or unload first"
-        )));
+        return Err(PgWasmError::ModuleAlreadyLoaded {
+            module_id: existing.module_id,
+            msg: format!(
+                "module `{module_name}` already exists in catalog; use `pg_wasm.reload(...)` or unload first"
+            ),
+        });
     }
 
     let bytes = read_module_bytes(&bytes_or_path)?;
+    let max_module_bytes = guc::MAX_MODULE_BYTES.get().max(0);
+    let max_u64 = u64::try_from(max_module_bytes)
+        .map_err(|_| PgWasmError::Internal("max_module_bytes overflow".to_string()))?;
+    if max_module_bytes == 0 {
+        if !bytes.is_empty() {
+            return Err(PgWasmError::ResourceLimitExceeded(
+                "module bytes are non-empty but pg_wasm.max_module_bytes is 0".to_string(),
+            ));
+        }
+    } else if u64::try_from(bytes.len())
+        .map_err(|_| PgWasmError::Internal("module byte length overflow".to_string()))?
+        > max_u64
+    {
+        return Err(PgWasmError::ResourceLimitExceeded(format!(
+            "module size {} bytes exceeds pg_wasm.max_module_bytes ({max_u64})",
+            bytes.len()
+        )));
+    }
     abi::validate(&bytes)?;
 
     let abi_override = match opts.abi {
