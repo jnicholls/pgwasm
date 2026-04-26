@@ -14,6 +14,11 @@ use crate::guc;
 pub(crate) mod component;
 pub(crate) mod core;
 pub(crate) mod engine;
+#[cfg(test)]
+#[path = "host_stub.rs"]
+pub(crate) mod host;
+#[cfg(not(test))]
+#[path = "host.rs"]
 pub(crate) mod host;
 pub(crate) mod pool;
 

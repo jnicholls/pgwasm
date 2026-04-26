@@ -158,6 +158,17 @@ cargo pgrx regress
 cargo pgrx test -p pg_wasm
 ```
 
+### Test lanes (host vs backend)
+
+- `cargo test` is a **host-only** lane and must stay free of direct Postgres
+  backend symbol dependencies.
+- `cargo pgrx test -p pg_wasm` is the **backend** lane for `#[pg_test]` and
+  any code paths that require pgrx/Postgres runtime symbols.
+- For CI, run both lanes explicitly (do not treat one as a substitute for the
+  other):
+  - `cargo test`
+  - `cargo pgrx test pg17 -p pg_wasm`
+
 When adding or modifying Rust code, follow
 [.cursor/rules/rust-coding-standards.mdc](.cursor/rules/rust-coding-standards.mdc)
 (alphabetical `#[derive(...)]`, three-block `use` layout, alphabetical

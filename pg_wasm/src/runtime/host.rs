@@ -1,4 +1,9 @@
 //! Host component interfaces (`pg-wasm:host/*`): logging and SPI query.
+//!
+//! IMPORTANT:
+//! This module intentionally depends on backend-only Postgres/pgrx symbols and
+//! must not be linked by host-only `cargo test` binaries. The runtime module
+//! wiring swaps in `host_stub.rs` for that lane.
 
 use std::ffi::{CStr, c_void};
 
