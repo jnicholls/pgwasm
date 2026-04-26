@@ -244,6 +244,9 @@ fn log_hook_unload_warning(module_id: u64, detail: &str) {
 }
 
 fn epoch_tick_ms() -> u64 {
+    if cfg!(all(test, not(feature = "pg_test"))) {
+        return 10;
+    }
     match u64::try_from(guc::EPOCH_TICK_MS.get()) {
         Ok(0) | Err(_) => 10,
         Ok(v) => v,
@@ -267,7 +270,11 @@ fn store_limits_for_component(policy: &EffectivePolicy) -> StoreLimits {
 }
 
 fn fuel_units(policy: &EffectivePolicy) -> Option<u64> {
-    if !guc::FUEL_ENABLED.get() {
+    #[cfg(all(test, not(feature = "pg_test")))]
+    let fuel_enabled = false;
+    #[cfg(any(not(test), feature = "pg_test"))]
+    let fuel_enabled = guc::FUEL_ENABLED.get();
+    if !fuel_enabled {
         return None;
     }
     let per = policy.fuel_per_invocation;
@@ -451,7 +458,8 @@ mod tests {
         let mut config = wasmtime::Config::new();
         config.wasm_component_model(true);
         config.epoch_interruption(true);
-        config.consume_fuel(false);
+        // `configure_store_for_hook` calls `Store::set_fuel`; that requires fuel metering on the engine.
+        config.consume_fuel(true);
         Engine::new(&config).map_err(|e| PgWasmError::Internal(format!("hooks test engine: {e}")))
     }
 
