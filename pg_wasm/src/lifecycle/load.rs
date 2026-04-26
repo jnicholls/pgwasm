@@ -178,14 +178,16 @@ fn load_component_path(
     let module_id_u64 = u64::try_from(module_id)
         .map_err(|_| PgWasmError::Internal("module_id does not fit u64".to_string()))?;
 
-    register_abort_artifact_cleanup(module_id_u64);
-
     let cwasm_path = artifacts::module_cwasm_path(module_id_u64)?;
     let precompile_hash = component::precompile_to(wasm_engine, bytes, &cwasm_path)?;
     artifacts::write_module_wasm(module_id_u64, bytes)?;
     artifacts::write_world_wit(module_id_u64, &wit_text)?;
     let wasm_dir = artifacts::module_dir(module_id_u64)?;
     artifacts::write_checksum(&wasm_dir, wasm_sha256_bytes)?;
+
+    // Register after artifacts exist: nested SPI during earlier steps can abort subtransactions; a
+    // scoped `AbortSub` hook must not run cleanup until the module directory is populated.
+    register_abort_artifact_cleanup(module_id_u64);
 
     let mut export_rows: Vec<exports::NewExport> = Vec::new();
     for (spec, wasm_export) in export_specs {
@@ -278,11 +280,11 @@ fn load_core_path(
     let module_id_u64 = u64::try_from(module_id)
         .map_err(|_| PgWasmError::Internal("module_id does not fit u64".to_string()))?;
 
-    register_abort_artifact_cleanup(module_id_u64);
-
     artifacts::write_module_wasm(module_id_u64, bytes)?;
     let wasm_dir = artifacts::module_dir(module_id_u64)?;
     artifacts::write_checksum(&wasm_dir, wasm_sha256_bytes)?;
+
+    register_abort_artifact_cleanup(module_id_u64);
 
     let export_specs = plan_core_export_proc_specs(bytes)?;
     let mut export_rows: Vec<exports::NewExport> = Vec::new();
@@ -344,21 +346,31 @@ fn try_prewarm_component_pool_note(module_id_u64: u64) {
 
 /// Remove on-disk artifacts if the surrounding (sub)transaction aborts. Uses only filesystem I/O
 /// (no SPI) because PostgreSQL forbids SPI in transaction abort callbacks.
+///
+/// `AbortSub` runs for **every** subtransaction abort in this backend (including SPI/savepoint
+/// cleanups). Only act when the aborted subtransaction is the same one that was current when the
+/// load registered this hook; otherwise nested aborts would delete artifacts mid-load.
 fn register_abort_artifact_cleanup(module_id_u64: u64) {
+    let registered_sub_id = unsafe { pg_sys::GetCurrentSubTransactionId() };
     pgrx::register_xact_callback(pgrx::PgXactCallbackEvent::Abort, move || {
         remove_module_artifact_dir_if_present(module_id_u64);
     });
-    register_subxact_callback(PgSubXactCallbackEvent::AbortSub, move |_, _| {
-        remove_module_artifact_dir_if_present(module_id_u64);
+    register_subxact_callback(PgSubXactCallbackEvent::AbortSub, move |my_subid, _| {
+        if my_subid == registered_sub_id {
+            remove_module_artifact_dir_if_present(module_id_u64);
+        }
     });
 }
 
 fn remove_module_artifact_dir_if_present(module_id_u64: u64) {
-    if let Ok(dir) = artifacts::module_dir(module_id_u64)
-        && dir.exists()
-    {
-        let _ = fs::remove_dir_all(&dir);
-    }
+    let _ = artifacts::with_artifact_fs_lock(|| {
+        if let Ok(dir) = artifacts::module_dir(module_id_u64)
+            && dir.exists()
+        {
+            fs::remove_dir_all(&dir)?;
+        }
+        Ok::<(), io::Error>(())
+    });
 }
 
 fn extension_oid() -> Result<pg_sys::Oid> {

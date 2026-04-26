@@ -10,6 +10,12 @@ use std::{
     sync::OnceLock,
 };
 
+#[cfg(not(unix))]
+use std::sync::Mutex;
+
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+
 use crate::errors::PgWasmError;
 
 pub(crate) const ARTIFACTS_DIRNAME: &str = "pg_wasm";
@@ -18,7 +24,51 @@ pub(crate) const MODULE_CWASM_FILENAME: &str = "module.cwasm";
 pub(crate) const MODULE_WASM_FILENAME: &str = "module.wasm";
 pub(crate) const WORLD_WIT_FILENAME: &str = "world.wit";
 
+/// Serializes mutations under `$PGDATA/pg_wasm/` across PostgreSQL backends. `#[pg_test]` uses
+/// many concurrent sessions against one cluster; each backend is a separate OS process, so a
+/// process-local `Mutex` is insufficient — use `flock` on Unix (non-Unix falls back to `Mutex`).
+#[cfg(not(unix))]
+static ARTIFACT_FS_LOCK: Mutex<()> = Mutex::new(());
+
 static DATA_DIR_CACHE: OnceLock<PathBuf> = OnceLock::new();
+
+#[cfg(unix)]
+struct ArtifactFlockGuard(File);
+
+#[cfg(unix)]
+impl ArtifactFlockGuard {
+    fn acquire(root: &Path) -> io::Result<Self> {
+        fs::create_dir_all(root)?;
+        let path = root.join(".artifact_io.lock");
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .truncate(true)
+            .write(true)
+            .open(&path)?;
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+        if rc != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self(file))
+    }
+}
+
+pub(crate) fn with_artifact_fs_lock<T>(f: impl FnOnce() -> io::Result<T>) -> io::Result<T> {
+    #[cfg(unix)]
+    {
+        let root = artifacts_root_dir()?;
+        let _guard = ArtifactFlockGuard::acquire(&root)?;
+        f()
+    }
+    #[cfg(not(unix))]
+    {
+        let _guard = ARTIFACT_FS_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        f()
+    }
+}
 
 pub(crate) fn artifacts_root_dir() -> io::Result<PathBuf> {
     Ok(resolve_data_dir()?.join(ARTIFACTS_DIRNAME))
@@ -72,6 +122,10 @@ pub(crate) fn write_world_wit(module_id: u64, world_wit: &str) -> io::Result<Pat
 }
 
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    with_artifact_fs_lock(|| write_atomic_unlocked(path, bytes))
+}
+
+fn write_atomic_unlocked(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(
             ErrorKind::InvalidInput,
@@ -131,6 +185,10 @@ pub(crate) fn verify_checksum(module_dir: &Path) -> Result<(), PgWasmError> {
 }
 
 pub(crate) fn prune_stale(active_ids: &BTreeSet<u64>) -> io::Result<usize> {
+    with_artifact_fs_lock(|| prune_stale_unlocked(active_ids))
+}
+
+pub(crate) fn prune_stale_unlocked(active_ids: &BTreeSet<u64>) -> io::Result<usize> {
     let root_dir = artifacts_root_dir()?;
     if !root_dir.exists() {
         return Ok(0);

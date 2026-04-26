@@ -156,7 +156,7 @@ fn fuel_units(policy: &EffectivePolicy) -> Option<u64> {
     Some(u64::try_from(per).unwrap_or(u64::MAX))
 }
 
-fn configure_store_for_invocation(
+pub(crate) fn configure_store_for_invocation(
     store: &mut Store<StoreCtx>,
     policy: &EffectivePolicy,
 ) -> Result<Option<u64>, PgWasmError> {

@@ -266,35 +266,18 @@ fn post_commit_unload_work_inner(module_id_u64: u64, active_ids: &BTreeSet<u64>)
         );
     }
 
-    let dir = match artifacts::module_dir(module_id_u64) {
-        Ok(p) => p,
-        Err(e) => {
-            ereport!(
-                PgLogLevel::WARNING,
-                PgSqlErrorCode::ERRCODE_WARNING,
-                format!("pg_wasm unload: artifacts::module_dir failed: {e}"),
-            );
-            return;
+    if let Err(e) = artifacts::with_artifact_fs_lock(|| {
+        let dir = artifacts::module_dir(module_id_u64)?;
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
         }
-    };
-    if dir.exists()
-        && let Err(e) = std::fs::remove_dir_all(&dir)
-    {
+        artifacts::prune_stale_unlocked(active_ids)?;
+        Ok(())
+    }) {
         ereport!(
             PgLogLevel::WARNING,
             PgSqlErrorCode::ERRCODE_WARNING,
-            format!(
-                "pg_wasm unload: remove_dir_all({}) failed: {e}",
-                dir.display()
-            ),
-        );
-    }
-
-    if let Err(e) = artifacts::prune_stale(active_ids) {
-        ereport!(
-            PgLogLevel::WARNING,
-            PgSqlErrorCode::ERRCODE_WARNING,
-            format!("pg_wasm unload: prune_stale failed: {e}"),
+            format!("pg_wasm unload: artifact cleanup failed: {e}"),
         );
     }
 

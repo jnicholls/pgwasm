@@ -93,6 +93,11 @@ mod tests {
     use crate::lifecycle::{load, reconfigure, unload};
     use crate::policy::{self, GucSnapshot};
     use crate::shmem;
+    use crate::trampoline;
+
+    /// Avoid epoch deadline traps during guest runs that call SPI while the shared engine ticker
+    /// advances the epoch (other tests in the same suite use epoch interruption heavily).
+    const RELAXED_INVOCATION_DEADLINE_MS: i32 = 86_400_000;
 
     #[pg_test]
     fn test_hello_pg_wasm() {
@@ -211,7 +216,8 @@ mod tests {
         let component = wasmtime::component::Component::from_binary(engine, LOG_GUEST_WASM)
             .expect("log guest component");
         let guc = GucSnapshot::from_gucs();
-        let policy = policy::resolve(&guc, None, None).expect("policy");
+        let mut policy = policy::resolve(&guc, None, None).expect("policy");
+        policy.invocation_deadline_ms = RELAXED_INVOCATION_DEADLINE_MS;
         let linker = crate::runtime::component::build_linker(engine, &policy).expect("linker");
         let ctx = crate::runtime::component::build_store_ctx(&policy).expect("store ctx");
         let mut store = wasmtime::Store::new(engine, ctx);
@@ -223,7 +229,7 @@ mod tests {
         let run = instance
             .get_typed_func::<(), ()>(&mut store, "run")
             .expect("export run");
-        store.set_fuel(u64::MAX).expect("set_fuel");
+        trampoline::configure_store_for_invocation(&mut store, &policy).expect("store limits/fuel");
         run.call(&mut store, ()).expect("run should succeed");
     }
 
@@ -239,7 +245,8 @@ mod tests {
             .expect("query guest component");
         let mut guc = GucSnapshot::from_gucs();
         guc.allow_spi = true;
-        let policy = policy::resolve(&guc, None, None).expect("policy with spi");
+        let mut policy = policy::resolve(&guc, None, None).expect("policy with spi");
+        policy.invocation_deadline_ms = RELAXED_INVOCATION_DEADLINE_MS;
         let linker = crate::runtime::component::build_linker(engine, &policy).expect("linker");
         let ctx = crate::runtime::component::build_store_ctx(&policy).expect("store ctx");
         let mut store = wasmtime::Store::new(engine, ctx);
@@ -251,7 +258,7 @@ mod tests {
         let run = instance
             .get_typed_func::<(), (String,)>(&mut store, "run")
             .expect("export run");
-        store.set_fuel(u64::MAX).expect("set_fuel");
+        trampoline::configure_store_for_invocation(&mut store, &policy).expect("store limits/fuel");
         let (summary,) = run.call(&mut store, ()).expect("run");
         assert!(
             summary.starts_with("cols=2") && summary.contains("cells=2"),
@@ -295,7 +302,8 @@ mod tests {
             .expect("write query guest");
         let mut guc = GucSnapshot::from_gucs();
         guc.allow_spi = true;
-        let policy = policy::resolve(&guc, None, None).expect("policy");
+        let mut policy = policy::resolve(&guc, None, None).expect("policy");
+        policy.invocation_deadline_ms = RELAXED_INVOCATION_DEADLINE_MS;
         let linker = crate::runtime::component::build_linker(engine, &policy).expect("linker");
         let ctx = crate::runtime::component::build_store_ctx(&policy).expect("store ctx");
         let mut store = wasmtime::Store::new(engine, ctx);
@@ -307,7 +315,7 @@ mod tests {
         let run = instance
             .get_typed_func::<(), (String,)>(&mut store, "run")
             .expect("export run");
-        store.set_fuel(u64::MAX).expect("set_fuel");
+        trampoline::configure_store_for_invocation(&mut store, &policy).expect("store limits/fuel");
         let (out,) = run.call(&mut store, ()).expect("run");
         assert!(
             out.contains("read-only") || out.contains("DELETE"),
@@ -327,7 +335,8 @@ mod tests {
             .expect("query guest");
         let mut guc = GucSnapshot::from_gucs();
         guc.allow_spi = true;
-        let policy_allow = policy::resolve(&guc, None, None).expect("allow");
+        let mut policy_allow = policy::resolve(&guc, None, None).expect("allow");
+        policy_allow.invocation_deadline_ms = RELAXED_INVOCATION_DEADLINE_MS;
         let linker =
             crate::runtime::component::build_linker(engine, &policy_allow).expect("linker");
 
@@ -349,7 +358,8 @@ mod tests {
         let run = instance
             .get_typed_func::<(), (String,)>(&mut store, "run")
             .expect("run export");
-        store.set_fuel(u64::MAX).expect("set_fuel");
+        trampoline::configure_store_for_invocation(&mut store, &policy_allow)
+            .expect("store limits/fuel");
         let (out,) = run.call(&mut store, ()).expect("run");
         assert!(
             out.starts_with("ERR:") && out.contains("pg_wasm.allow_spi"),

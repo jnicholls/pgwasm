@@ -7,10 +7,11 @@
 
 use std::ffi::{CStr, c_void};
 
+use pgrx::AnyElement;
 use pgrx::datum::DatumWithOid;
 use pgrx::pg_sys;
 use pgrx::prelude::*;
-use pgrx::spi::Spi;
+use pgrx::spi::{Spi, SpiHeapTupleDataEntry};
 use wasmtime::component::{HasSelf, Linker};
 
 use crate::errors::PgWasmError;
@@ -135,19 +136,13 @@ fn query_read_impl(sql: String, params: Vec<query::Value>) -> Result<query::Resu
         }
 
         let mut rows_out = Vec::new();
-        let cursor = tup_table;
-        while let Some(row) = cursor.get_heap_tuple().map_err(|e| e.to_string())? {
+        for row in tup_table {
             let mut columns = Vec::new();
             for (col_idx, typoid) in column_typoids.iter().enumerate() {
                 let entry = row
                     .get_datum_by_ordinal(col_idx + 1)
                     .map_err(|e| e.to_string())?;
-                let cell = match entry.value::<pg_sys::Datum>().map_err(|e| e.to_string())? {
-                    None => query::Value::Null,
-                    Some(datum) => {
-                        datum_to_host_value(*typoid, datum, false).map_err(|e| e.to_string())?
-                    }
-                };
+                let cell = spi_entry_to_host_value(entry, *typoid)?;
                 columns.push(cell);
             }
             rows_out.push(query::Row { columns });
@@ -158,6 +153,75 @@ fn query_read_impl(sql: String, params: Vec<query::Value>) -> Result<query::Resu
             rows: rows_out,
         })
     })
+}
+
+fn spi_unknown_type_via_text(entry: &SpiHeapTupleDataEntry<'_>) -> Result<query::Value, String> {
+    match entry.value::<AnyElement>().map_err(|e| e.to_string())? {
+        None => Ok(query::Value::Null),
+        Some(any) => text_fallback(any.oid(), any.datum()).map_err(|e| e.to_string()),
+    }
+}
+
+fn spi_entry_to_host_value(
+    entry: &SpiHeapTupleDataEntry<'_>,
+    typoid: pg_sys::Oid,
+) -> Result<query::Value, String> {
+    unsafe {
+        if pg_sys::get_typtype(typoid) == pg_sys::TYPTYPE_PSEUDO as i8 {
+            return spi_unknown_type_via_text(entry);
+        }
+    }
+
+    if typoid == pg_sys::BOOLOID {
+        return Ok(match entry.value::<bool>().map_err(|e| e.to_string())? {
+            None => query::Value::Null,
+            Some(b) => query::Value::Bool(b),
+        });
+    }
+    if typoid == pg_sys::INT2OID {
+        return Ok(match entry.value::<i16>().map_err(|e| e.to_string())? {
+            None => query::Value::Null,
+            Some(v) => query::Value::Int(i64::from(v)),
+        });
+    }
+    if typoid == pg_sys::INT4OID {
+        return Ok(match entry.value::<i32>().map_err(|e| e.to_string())? {
+            None => query::Value::Null,
+            Some(v) => query::Value::Int(i64::from(v)),
+        });
+    }
+    if typoid == pg_sys::INT8OID {
+        return Ok(match entry.value::<i64>().map_err(|e| e.to_string())? {
+            None => query::Value::Null,
+            Some(v) => query::Value::Int(v),
+        });
+    }
+    if typoid == pg_sys::FLOAT4OID {
+        return Ok(match entry.value::<f32>().map_err(|e| e.to_string())? {
+            None => query::Value::Null,
+            Some(f) => query::Value::Float(f64::from(f)),
+        });
+    }
+    if typoid == pg_sys::FLOAT8OID {
+        return Ok(match entry.value::<f64>().map_err(|e| e.to_string())? {
+            None => query::Value::Null,
+            Some(f) => query::Value::Float(f),
+        });
+    }
+    if typoid == pg_sys::TEXTOID || typoid == pg_sys::VARCHAROID || typoid == pg_sys::BPCHAROID {
+        return Ok(match entry.value::<String>().map_err(|e| e.to_string())? {
+            None => query::Value::Null,
+            Some(s) => query::Value::Text(s),
+        });
+    }
+    if typoid == pg_sys::BYTEAOID {
+        return Ok(match entry.value::<Vec<u8>>().map_err(|e| e.to_string())? {
+            None => query::Value::Null,
+            Some(bytes) => query::Value::Bytea(bytes),
+        });
+    }
+
+    spi_unknown_type_via_text(entry)
 }
 
 fn wit_value_to_spi_param(
@@ -171,75 +235,6 @@ fn wit_value_to_spi_param(
         query::Value::Float(f) => Ok(HostQuerySpiParam::Float(*f)),
         query::Value::Text(s) => Ok(HostQuerySpiParam::Text(s.clone())),
         query::Value::Bytea(bytes) => Ok(HostQuerySpiParam::Bytea(bytes.clone())),
-    }
-}
-
-fn datum_to_host_value(
-    typoid: pg_sys::Oid,
-    datum: pg_sys::Datum,
-    is_null: bool,
-) -> Result<query::Value, PgWasmError> {
-    if is_null {
-        return Ok(query::Value::Null);
-    }
-
-    unsafe {
-        let type_form = pg_sys::get_typtype(typoid);
-        if type_form == pg_sys::TYPTYPE_PSEUDO as i8 {
-            return text_fallback(typoid, datum);
-        }
-
-        if typoid == pg_sys::BOOLOID {
-            let b = bool::from_datum(datum, false).ok_or_else(|| {
-                PgWasmError::Internal("failed to decode bool for host query row".to_string())
-            })?;
-            return Ok(query::Value::Bool(b));
-        }
-        if typoid == pg_sys::INT2OID {
-            let v = i16::from_datum(datum, false).ok_or_else(|| {
-                PgWasmError::Internal("failed to decode int2 for host query row".to_string())
-            })?;
-            return Ok(query::Value::Int(i64::from(v)));
-        }
-        if typoid == pg_sys::INT4OID {
-            let v = i32::from_datum(datum, false).ok_or_else(|| {
-                PgWasmError::Internal("failed to decode int4 for host query row".to_string())
-            })?;
-            return Ok(query::Value::Int(i64::from(v)));
-        }
-        if typoid == pg_sys::INT8OID {
-            let v = i64::from_datum(datum, false).ok_or_else(|| {
-                PgWasmError::Internal("failed to decode int8 for host query row".to_string())
-            })?;
-            return Ok(query::Value::Int(v));
-        }
-        if typoid == pg_sys::FLOAT4OID {
-            let f = f32::from_datum(datum, false).ok_or_else(|| {
-                PgWasmError::Internal("failed to decode float4 for host query row".to_string())
-            })?;
-            return Ok(query::Value::Float(f64::from(f)));
-        }
-        if typoid == pg_sys::FLOAT8OID {
-            let f = f64::from_datum(datum, false).ok_or_else(|| {
-                PgWasmError::Internal("failed to decode float8 for host query row".to_string())
-            })?;
-            return Ok(query::Value::Float(f));
-        }
-        if typoid == pg_sys::TEXTOID || typoid == pg_sys::VARCHAROID || typoid == pg_sys::BPCHAROID
-        {
-            let s = String::from_datum(datum, false).ok_or_else(|| {
-                PgWasmError::Internal("failed to decode text for host query row".to_string())
-            })?;
-            return Ok(query::Value::Text(s));
-        }
-        if typoid == pg_sys::BYTEAOID {
-            let bytes: &[u8] = <&[u8]>::from_datum(datum, false).ok_or_else(|| {
-                PgWasmError::Internal("failed to decode bytea for host query row".to_string())
-            })?;
-            return Ok(query::Value::Bytea(bytes.to_vec()));
-        }
-
-        text_fallback(typoid, datum)
     }
 }
 

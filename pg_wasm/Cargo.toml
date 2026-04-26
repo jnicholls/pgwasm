@@ -19,6 +19,7 @@ pg_test = []
 
 [dependencies]
 anyhow.workspace = true
+libc.workspace = true
 pgrx.workspace = true
 serde.workspace = true
 serde_json.workspace = true
