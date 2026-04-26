@@ -574,6 +574,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(not(feature = "pg_test"))]
     #[test]
     fn on_load_err_maps_to_invalid_configuration() -> Result<()> {
         let _guard = lock_hook_tests();
@@ -603,6 +604,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(not(feature = "pg_test"))]
     #[test]
     fn on_unload_trap_returns_ok_from_inner() -> Result<()> {
         let _guard = lock_hook_tests();

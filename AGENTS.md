@@ -92,6 +92,7 @@ When in doubt, match patterns already used in neighboring modules in this reposi
 - `cargo fmt --all` to ensure all code is formatted according to our rustfmt rules.
 - `cargo check --workspace` to ensure the whole workspace has valid syntax and type checks pass.
 - `cargo clippy --workspace -- -D warnings` to check all lints and treat warnings as errors. Only #[allow(dead_code)] may be used on code that is intended to be used in future work. Otherwise, all warnings should be fixed, not allowed.
+- `cargo test --workspace` to run all Rust host tests to ensure they pass.
 - `cargo pgrx test pg17 -p pg_wasm` to run all PostgreSQL/pgrx tests and ensure they pass on at least PostgreSQL 17.
 
 ## Crate dependencies and API documentation
