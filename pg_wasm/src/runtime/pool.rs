@@ -161,6 +161,7 @@ impl PoolInner {
         let linker = self.linker.clone();
         let ctx = component::build_store_ctx(policy)?;
         let mut store = Store::new(engine, ctx);
+        component::ensure_component_spi_matches_policy(engine, &self.component, policy)?;
         let instance = linker
             .instantiate(&mut store, &self.component)
             .map_err(|error| {

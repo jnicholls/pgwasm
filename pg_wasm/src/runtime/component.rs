@@ -136,6 +136,32 @@ pub(crate) fn build_linker(
     Ok(linker)
 }
 
+/// Substring matched against component import names (e.g. `pg-wasm:host/query@0.1.0`).
+const QUERY_HOST_IMPORT_SUBSTR: &str = "pg-wasm:host/query";
+
+/// Fail before linker instantiation when the component imports the SPI query interface but
+/// `policy.allow_spi` is false, so callers see a policy hint instead of a generic linker error.
+pub(crate) fn ensure_component_spi_matches_policy(
+    engine: &Engine,
+    component: &Component,
+    policy: &EffectivePolicy,
+) -> Result<(), PgWasmError> {
+    if policy.allow_spi {
+        return Ok(());
+    }
+    let imports_query = component
+        .component_type()
+        .imports(engine)
+        .any(|(name, _)| name.contains(QUERY_HOST_IMPORT_SUBSTR));
+    if imports_query {
+        return Err(PgWasmError::PermissionDenied(
+            "component imports pg-wasm:host/query but SPI is disabled; enable pg_wasm.allow_spi"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Construct per-store `StoreCtx` from resolved policy (WASI surface narrowed by GUC + overrides).
 pub(crate) fn build_store_ctx(policy: &EffectivePolicy) -> Result<StoreCtx, PgWasmError> {
     let mut builder = WasiCtxBuilder::new();

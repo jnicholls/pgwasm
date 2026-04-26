@@ -86,7 +86,7 @@ mod tests {
     use pgrx::spi::Spi;
     use serde_json::json;
 
-    use crate::catalog::{exports, modules};
+    use crate::catalog::modules;
     use crate::config::{Limits, PolicyOverrides};
     use crate::errors::PgWasmError;
     use crate::lifecycle::unload::test_support as unload_test;
@@ -117,18 +117,6 @@ mod tests {
             wit_world: "default".to_string(),
         };
         let inserted = modules::insert(&new_module).expect("stub module insert");
-
-        let hook_export = exports::NewExport {
-            arg_types: vec![],
-            fn_oid: None,
-            kind: "hook".to_string(),
-            module_id: inserted.module_id,
-            ret_type: None,
-            signature: json!({}),
-            sql_name: "on_reconfigure_stub".to_string(),
-            wasm_name: "on-reconfigure".to_string(),
-        };
-        let hook_row = exports::insert(&hook_export).expect("hook export insert");
 
         let gen_before = shmem::read_generation();
 
@@ -165,7 +153,6 @@ mod tests {
             .expect("module should still exist");
         assert_eq!(unchanged.generation, 1);
 
-        exports::delete(hook_row.export_id).expect("hook export delete");
         modules::delete(inserted.module_id).expect("stub module delete");
     }
 
@@ -228,12 +215,15 @@ mod tests {
         let linker = crate::runtime::component::build_linker(engine, &policy).expect("linker");
         let ctx = crate::runtime::component::build_store_ctx(&policy).expect("store ctx");
         let mut store = wasmtime::Store::new(engine, ctx);
+        crate::runtime::component::ensure_component_spi_matches_policy(engine, &component, &policy)
+            .expect("spi policy vs component imports");
         let instance = linker
             .instantiate(&mut store, &component)
             .expect("instantiate log guest");
         let run = instance
             .get_typed_func::<(), ()>(&mut store, "run")
             .expect("export run");
+        store.set_fuel(u64::MAX).expect("set_fuel");
         run.call(&mut store, ()).expect("run should succeed");
     }
 
@@ -253,12 +243,15 @@ mod tests {
         let linker = crate::runtime::component::build_linker(engine, &policy).expect("linker");
         let ctx = crate::runtime::component::build_store_ctx(&policy).expect("store ctx");
         let mut store = wasmtime::Store::new(engine, ctx);
+        crate::runtime::component::ensure_component_spi_matches_policy(engine, &component, &policy)
+            .expect("spi policy vs component imports");
         let instance = linker
             .instantiate(&mut store, &component)
             .expect("instantiate query guest");
         let run = instance
             .get_typed_func::<(), (String,)>(&mut store, "run")
             .expect("export run");
+        store.set_fuel(u64::MAX).expect("set_fuel");
         let (summary,) = run.call(&mut store, ()).expect("run");
         assert!(
             summary.starts_with("cols=2") && summary.contains("cells=2"),
@@ -279,12 +272,10 @@ mod tests {
         let mut guc = GucSnapshot::from_gucs();
         guc.allow_spi = false;
         let policy = policy::resolve(&guc, None, None).expect("policy without spi");
-        let linker = crate::runtime::component::build_linker(engine, &policy).expect("linker");
-        let ctx = crate::runtime::component::build_store_ctx(&policy).expect("store ctx");
-        let mut store = wasmtime::Store::new(engine, ctx);
-        let err = linker
-            .instantiate(&mut store, &component)
-            .expect_err("instantiate should fail without query import");
+        let err = crate::runtime::component::ensure_component_spi_matches_policy(
+            engine, &component, &policy,
+        )
+        .expect_err("query guest should be rejected when SPI is disabled");
         let msg = err.to_string();
         assert!(
             msg.contains("pg_wasm.allow_spi"),
@@ -308,12 +299,15 @@ mod tests {
         let linker = crate::runtime::component::build_linker(engine, &policy).expect("linker");
         let ctx = crate::runtime::component::build_store_ctx(&policy).expect("store ctx");
         let mut store = wasmtime::Store::new(engine, ctx);
+        crate::runtime::component::ensure_component_spi_matches_policy(engine, &component, &policy)
+            .expect("spi policy vs component imports");
         let instance = linker
             .instantiate(&mut store, &component)
             .expect("instantiate");
         let run = instance
             .get_typed_func::<(), (String,)>(&mut store, "run")
             .expect("export run");
+        store.set_fuel(u64::MAX).expect("set_fuel");
         let (out,) = run.call(&mut store, ()).expect("run");
         assert!(
             out.contains("read-only") || out.contains("DELETE"),
@@ -343,12 +337,19 @@ mod tests {
         let mut ctx = crate::runtime::component::build_store_ctx(&policy_allow).expect("ctx");
         ctx.host.allow_spi = policy_deny.allow_spi;
         let mut store = wasmtime::Store::new(engine, ctx);
+        crate::runtime::component::ensure_component_spi_matches_policy(
+            engine,
+            &component,
+            &policy_allow,
+        )
+        .expect("spi policy vs component imports");
         let instance = linker
             .instantiate(&mut store, &component)
             .expect("instantiate");
         let run = instance
             .get_typed_func::<(), (String,)>(&mut store, "run")
             .expect("run export");
+        store.set_fuel(u64::MAX).expect("set_fuel");
         let (out,) = run.call(&mut store, ()).expect("run");
         assert!(
             out.starts_with("ERR:") && out.contains("pg_wasm.allow_spi"),
@@ -478,31 +479,31 @@ mod tests {
         Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
 
         let name = format!("load_rb_{}", std::process::id());
-        let escaped = name.replace('\'', "''");
         let bytes = decode_hex_bytes(LOAD_FIXTURE_COMPONENT_WASM_HEX);
 
-        Spi::run("BEGIN").unwrap();
-        let ok = Spi::get_one::<bool>(&format!(
-            "SELECT wasm.load('{escaped}', json_build_object('bytes', to_json(ARRAY[{payload}]::int[])), NULL)",
-            payload = bytes
-                .iter()
-                .map(|b| b.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))
-        .unwrap()
-        .unwrap();
+        // `#[pg_test]` already runs inside a transaction; nested `BEGIN` via SPI is invalid.
+        // Use an internal subtransaction so rollback exercises the same catalog + artifact rules.
+        unsafe {
+            pg_sys::BeginInternalSubTransaction(c"pg_wasm_load_rb_test".as_ptr());
+        }
+
+        let ok = load::load_impl(
+            &name,
+            pgrx::Json(serde_json::json!({ "bytes": bytes })),
+            None,
+        )
+        .expect("load in subtransaction");
         assert!(ok);
 
-        let mid = Spi::get_one::<i64>(&format!(
-            "SELECT module_id::bigint FROM wasm.modules WHERE name = '{escaped}'"
-        ))
-        .unwrap()
-        .unwrap();
-        let mid_u = u64::try_from(mid).unwrap();
+        let row = modules::get_by_name(&name)
+            .expect("module read")
+            .expect("module row");
+        let mid_u = u64::try_from(row.module_id).unwrap();
         assert!(unload_test::artifact_dir_exists(mid_u));
 
-        Spi::run("ROLLBACK").unwrap();
+        unsafe {
+            pg_sys::RollbackAndReleaseCurrentSubTransaction();
+        }
 
         assert_eq!(unload_test::count_modules_where_name(&name), 0);
         assert!(!unload_test::artifact_dir_exists(mid_u));

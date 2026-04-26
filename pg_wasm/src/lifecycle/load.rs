@@ -8,6 +8,7 @@ use std::path::{Component, Path, PathBuf};
 
 use pgrx::prelude::*;
 use pgrx::spi::{self, Spi};
+use pgrx::{PgSubXactCallbackEvent, register_subxact_callback};
 use serde_json::{Value, json};
 use wasmparser::{CompositeInnerType, ExternalKind, Parser, Payload, ValType};
 use wit_parser::{Function, FunctionKind, Type, WorldItem, WorldKey};
@@ -341,16 +342,23 @@ fn try_prewarm_component_pool_note(module_id_u64: u64) {
     );
 }
 
-/// Remove on-disk artifacts if the surrounding transaction aborts. Uses only filesystem I/O
-/// (no SPI) because PostgreSQL forbids SPI in `XACT_EVENT_ABORT` callbacks.
+/// Remove on-disk artifacts if the surrounding (sub)transaction aborts. Uses only filesystem I/O
+/// (no SPI) because PostgreSQL forbids SPI in transaction abort callbacks.
 fn register_abort_artifact_cleanup(module_id_u64: u64) {
     pgrx::register_xact_callback(pgrx::PgXactCallbackEvent::Abort, move || {
-        if let Ok(dir) = artifacts::module_dir(module_id_u64)
-            && dir.exists()
-        {
-            let _ = fs::remove_dir_all(&dir);
-        }
+        remove_module_artifact_dir_if_present(module_id_u64);
     });
+    register_subxact_callback(PgSubXactCallbackEvent::AbortSub, move |_, _| {
+        remove_module_artifact_dir_if_present(module_id_u64);
+    });
+}
+
+fn remove_module_artifact_dir_if_present(module_id_u64: u64) {
+    if let Ok(dir) = artifacts::module_dir(module_id_u64)
+        && dir.exists()
+    {
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 fn extension_oid() -> Result<pg_sys::Oid> {
