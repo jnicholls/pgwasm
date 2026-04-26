@@ -115,7 +115,7 @@ todos:
     status: completed
   - id: load-orchestration
     content: Implement `lifecycle::load` running AuthZ -> read -> validate -> classify -> resolve WIT -> plan types -> plan exports -> resolve policy -> compile + persist -> register procs -> on-load hook -> bump generation. All DDL runs via SPI inside one transaction; failure rolls everything back and removes the module dir.
-    status: pending
+    status: completed
   - id: unload-orchestration
     content: Implement `lifecycle::unload` with `on-unload` hook, `RemoveFunctionById`, UDT drop (respecting `pg_wasm.dependencies` and `options.cascade`), catalog row deletion, artifact dir removal, generation bump.
     status: completed

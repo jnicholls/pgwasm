@@ -73,7 +73,8 @@ pub(crate) fn unload_impl(module_name: &str, cascade: bool) -> Result<bool> {
         ));
     }
 
-    register_post_commit_cleanup(module_id_u64);
+    let active_for_prune = active_module_ids()?;
+    register_post_commit_cleanup(module_id_u64, active_for_prune);
 
     Ok(true)
 }
@@ -247,6 +248,21 @@ fn active_module_ids() -> Result<BTreeSet<u64>> {
 /// the test returns, so `PgXactCallbackEvent::Commit` never fires there; tests that need to
 /// assert on-disk behavior call this explicitly after `unload_impl` (see `lib.rs` tests).
 pub(crate) fn run_post_commit_unload_work(module_id_u64: u64) {
+    let active = match active_module_ids() {
+        Ok(ids) => ids,
+        Err(e) => {
+            ereport!(
+                PgLogLevel::WARNING,
+                PgSqlErrorCode::ERRCODE_WARNING,
+                format!("pg_wasm unload: active_module_ids failed: {e}"),
+            );
+            BTreeSet::new()
+        }
+    };
+    post_commit_unload_work_inner(module_id_u64, &active);
+}
+
+fn post_commit_unload_work_inner(module_id_u64: u64, active_ids: &BTreeSet<u64>) {
     if let Err(e) = pool::drain(module_id_u64) {
         ereport!(
             PgLogLevel::WARNING,
@@ -279,32 +295,21 @@ pub(crate) fn run_post_commit_unload_work(module_id_u64: u64) {
         );
     }
 
-    match active_module_ids() {
-        Ok(ids) => {
-            if let Err(e) = artifacts::prune_stale(&ids) {
-                ereport!(
-                    PgLogLevel::WARNING,
-                    PgSqlErrorCode::ERRCODE_WARNING,
-                    format!("pg_wasm unload: prune_stale failed: {e}"),
-                );
-            }
-        }
-        Err(e) => {
-            ereport!(
-                PgLogLevel::WARNING,
-                PgSqlErrorCode::ERRCODE_WARNING,
-                format!("pg_wasm unload: active_module_ids for prune_stale failed: {e}"),
-            );
-        }
+    if let Err(e) = artifacts::prune_stale(active_ids) {
+        ereport!(
+            PgLogLevel::WARNING,
+            PgSqlErrorCode::ERRCODE_WARNING,
+            format!("pg_wasm unload: prune_stale failed: {e}"),
+        );
     }
 
     let _ = shmem::bump_generation(module_id_u64);
     shmem::free_slots(module_id_u64);
 }
 
-fn register_post_commit_cleanup(module_id_u64: u64) {
+fn register_post_commit_cleanup(module_id_u64: u64, active_ids: BTreeSet<u64>) {
     pgrx::register_xact_callback(pgrx::PgXactCallbackEvent::Commit, move || {
-        run_post_commit_unload_work(module_id_u64);
+        post_commit_unload_work_inner(module_id_u64, &active_ids);
     });
 }
 

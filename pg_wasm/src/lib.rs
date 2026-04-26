@@ -66,6 +66,16 @@ mod sql_api {
             .map(|n| n as i64)
             .map_err(crate::errors::PgWasmError::into_error_report)
     }
+
+    #[pg_extern]
+    fn load(
+        module_name: &str,
+        bytes_or_path: pgrx::Json,
+        options: default!(Option<pgrx::Json>, NULL),
+    ) -> core::result::Result<bool, pgrx::pg_sys::panic::ErrorReport> {
+        crate::lifecycle::load::load_impl(module_name, bytes_or_path, options)
+            .map_err(crate::errors::PgWasmError::into_error_report)
+    }
 }
 
 #[cfg(feature = "pg_test")]
@@ -80,7 +90,7 @@ mod tests {
     use crate::config::{Limits, PolicyOverrides};
     use crate::errors::PgWasmError;
     use crate::lifecycle::unload::test_support as unload_test;
-    use crate::lifecycle::{reconfigure, unload};
+    use crate::lifecycle::{load, reconfigure, unload};
     use crate::policy::{self, GucSnapshot};
     use crate::shmem;
 
@@ -450,6 +460,74 @@ mod tests {
                 assert!(msg.contains("no_such_wasm_module___"), "message: {msg}");
             }
             other => panic!("expected NotFound, got {other:?}"),
+        }
+    }
+
+    /// Minimal component fixture (`foo:fixture` world, export `add: func() -> s32`).
+    const LOAD_FIXTURE_COMPONENT_WASM_HEX: &str = "0061736d0d00010001550061736d010000000105016000017f030201000707010361646400000a06010400412a0b002f0970726f647563657273010c70726f6365737365642d6279010d7769742d636f6d706f6e656e7407302e3234372e300204010000000705014000007a060901000001000361646408060100000000000b09010003616464010000003d0e636f6d706f6e656e742d6e616d6501080000010003616464010900110100046d61696e010900120100046d61696e010c010200036164640103616464002f0970726f647563657273010c70726f6365737365642d6279010d7769742d636f6d706f6e656e7407302e3234372e30";
+
+    fn decode_hex_bytes(hex: &str) -> Vec<u8> {
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    #[pg_test]
+    fn load_transaction_rollback_removes_artifact_dir() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        let name = format!("load_rb_{}", std::process::id());
+        let escaped = name.replace('\'', "''");
+        let bytes = decode_hex_bytes(LOAD_FIXTURE_COMPONENT_WASM_HEX);
+
+        Spi::run("BEGIN").unwrap();
+        let ok = Spi::get_one::<bool>(&format!(
+            "SELECT wasm.load('{escaped}', json_build_object('bytes', to_json(ARRAY[{payload}]::int[])), NULL)",
+            payload = bytes
+                .iter()
+                .map(|b| b.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(ok);
+
+        let mid = Spi::get_one::<i64>(&format!(
+            "SELECT module_id::bigint FROM wasm.modules WHERE name = '{escaped}'"
+        ))
+        .unwrap()
+        .unwrap();
+        let mid_u = u64::try_from(mid).unwrap();
+        assert!(unload_test::artifact_dir_exists(mid_u));
+
+        Spi::run("ROLLBACK").unwrap();
+
+        assert_eq!(unload_test::count_modules_where_name(&name), 0);
+        assert!(!unload_test::artifact_dir_exists(mid_u));
+    }
+
+    #[pg_test]
+    fn load_policy_widen_allow_spi_is_denied() {
+        Spi::run("CREATE EXTENSION IF NOT EXISTS pg_wasm").unwrap();
+
+        let name = format!("load_pol_{}", std::process::id());
+        let bytes = decode_hex_bytes(LOAD_FIXTURE_COMPONENT_WASM_HEX);
+        let err = load::load_impl(
+            &name,
+            pgrx::Json(serde_json::json!({ "bytes": bytes })),
+            Some(pgrx::Json(serde_json::json!({
+                "overrides": { "allow_spi": true }
+            }))),
+        )
+        .expect_err("policy widen should be denied");
+
+        match err {
+            PgWasmError::PermissionDenied(msg) => {
+                assert!(msg.contains("allow_spi"), "message: {msg}");
+            }
+            other => panic!("expected PermissionDenied, got {other:?}"),
         }
     }
 }

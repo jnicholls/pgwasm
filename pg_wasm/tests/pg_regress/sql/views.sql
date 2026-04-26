@@ -1,6 +1,9 @@
 -- Observability SRFs: catalog-backed rows, shmem stats, reader grants.
 -- Extension is created by tests/pg_regress/sql/setup.sql.
 
+SELECT set_config('pg_wasm.fuel_enabled', 'off', false);
+SELECT set_config('pg_wasm.invocation_deadline_ms', '0', false);
+
 -- Clear stale module slots from prior regress / `#[pg_test]` runs (shmem survives `DROP DATABASE`).
 SELECT wasm.test_scrub_shmem_slots(1, 20000) AS scrubbed_slots;
 
