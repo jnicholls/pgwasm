@@ -3,13 +3,13 @@
 use std::collections::BTreeMap;
 
 use pgrx::Json;
-use pgrx::prelude::*;
 use pgrx::spi::{self, Spi};
 use serde_json::Value;
 
 use crate::catalog::{exports, modules};
 use crate::config::{Limits, PolicyOverrides};
 use crate::errors::{PgWasmError, Result};
+use crate::hooks;
 use crate::policy;
 use crate::shmem;
 
@@ -46,15 +46,9 @@ pub(crate) fn reconfigure_impl(
     let effective = policy::resolve(&snapshot, Some(&override_policy), Some(&override_limits))?;
 
     if exports::get_by_module_and_wasm_name(module.module_id, ON_RECONFIGURE_WASM_NAME)?.is_some() {
-        // TODO(wave-4: hooks): invoke `on-reconfigure` with serialized `effective` policy.
-        ereport!(
-            PgLogLevel::NOTICE,
-            PgSqlErrorCode::ERRCODE_SUCCESSFUL_COMPLETION,
-            format!(
-                "pg_wasm: module `{}` exports `{}`; hook invocation is not implemented yet (wave-4)",
-                module.name, ON_RECONFIGURE_WASM_NAME
-            )
-        );
+        let module_id_u64 = u64::try_from(module.module_id)
+            .map_err(|_| PgWasmError::Internal("module_id does not fit u64".to_string()))?;
+        hooks::on_reconfigure(module_id_u64, &effective)?;
     }
 
     let next_generation = module.generation.saturating_add(1);
@@ -76,9 +70,6 @@ pub(crate) fn reconfigure_impl(
             "catalog update returned no row for existing module".to_string(),
         ));
     };
-
-    // Validated effective policy; serialized form will feed `on-reconfigure` in wave-4.
-    let _effective = effective;
 
     shmem::bump_generation(module.module_id as u64);
 

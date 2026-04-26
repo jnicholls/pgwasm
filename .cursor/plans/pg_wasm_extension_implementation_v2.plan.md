@@ -148,7 +148,7 @@ todos:
     status: completed
   - id: hooks
     content: Implement `hooks::{on_load, on_unload, on_reconfigure}` invocations with config blob passing. Hooks are optional component exports with stable names; absence is not an error. on-unload failures are logged, not fatal.
-    status: pending
+    status: completed
   - id: error-mapping
     content: Finalize `errors::PgWasmError` -> `ereport` conversion, including SQLSTATE, MESSAGE, DETAIL (module_id, export_id, wasmtime_version), HINT (policy hints on denials).
     status: pending

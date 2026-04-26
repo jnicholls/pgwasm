@@ -1,6 +1,6 @@
 //! Bounded per-module component instance pool (Store + Instance).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque, hash_map::Entry};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -217,12 +217,15 @@ impl InstancePool {
         let mut map = pools()
             .lock()
             .map_err(|_| PgWasmError::Internal("module pool map mutex poisoned".to_string()))?;
-        if map.insert(module_id, Arc::clone(&inner)).is_some() {
-            return Err(PgWasmError::InvalidConfiguration(format!(
-                "instance pool for module_id {module_id} already exists"
-            )));
+        match map.entry(module_id) {
+            Entry::Occupied(entry) => Ok(Self {
+                inner: Arc::clone(entry.get()),
+            }),
+            Entry::Vacant(entry) => {
+                entry.insert(Arc::clone(&inner));
+                Ok(Self { inner })
+            }
         }
-        Ok(Self { inner })
     }
 
     pub(crate) fn acquire(
@@ -236,6 +239,33 @@ impl InstancePool {
     pub(crate) fn drain(&self) {
         self.inner.drain();
     }
+}
+
+/// Acquire a pooled instance, creating the per-module pool on first use.
+///
+/// Used by lifecycle hooks and the UDF trampoline so every caller shares the same
+/// `PoolInner` for a given `module_id`.
+pub(crate) fn acquire_pooled(
+    module_id: u64,
+    component: Arc<Component>,
+    engine: &Engine,
+    policy: &EffectivePolicy,
+) -> Result<PooledInstance, PgWasmError> {
+    let pool = {
+        let map = pools()
+            .lock()
+            .map_err(|_| PgWasmError::Internal("module pool map mutex poisoned".to_string()))?;
+        if let Some(inner) = map.get(&module_id) {
+            InstancePool {
+                inner: Arc::clone(inner),
+            }
+        } else {
+            drop(map);
+            let linker = component::build_linker(engine, policy)?;
+            InstancePool::new(module_id, Arc::clone(&component), linker, policy)?
+        }
+    };
+    pool.acquire(engine, policy)
 }
 
 /// Remove and drain the pool for `module_id`, if any.
