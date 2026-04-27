@@ -6,9 +6,6 @@ functions. It is written for engineers contributing to the extension and for
 operators who need to reason about isolation, resource control, and
 introspection.
 
-The implementation plan that materializes this design lives at
-[`.cursor/plans/pg_wasm_extension_implementation_v2.plan.md`](../.cursor/plans/pg_wasm_extension_implementation_v2.plan.md).
-
 SQL objects live in the extension schema (`wasm` by default, from
 `pg_wasm.control`); configuration parameters keep the `pg_wasm.*` prefix.
 

@@ -9,11 +9,6 @@ domains, lists), its bytes are compiled once and cached on disk, and every
 invocation runs inside a [Wasmtime](https://wasmtime.dev/) sandbox whose
 capabilities are configured by the database administrator.
 
-> Status: this is the **v2** rewrite. The
-> [implementation plan](.cursor/plans/pg_wasm_extension_implementation_v2.plan.md)
-> tracks what ships; all listed v2 implementation tasks are complete, with
-> the build-feature split closed intentionally without implementation.
-
 ## Table of contents
 
 - [Why pg_wasm](#why-pg_wasm)
@@ -136,8 +131,6 @@ hot/cold reconfiguration semantics.
 - [docs/wit-mapping.md](docs/wit-mapping.md) — the canonical WIT →
   PostgreSQL type table with WIT and SQL examples for every kind
   (primitives, composites, generics, resources).
-- [.cursor/plans/pg_wasm_extension_implementation_v2.plan.md](.cursor/plans/pg_wasm_extension_implementation_v2.plan.md)
-  — authoritative status of every v2 todo.
 
 ## Development
 
