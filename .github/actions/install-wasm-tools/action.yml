@@ -9,3 +9,6 @@ runs:
     - name: cargo install wasm-tools
       shell: bash
       run: cargo install wasm-tools --locked --version 1.247.0
+    - name: install wasm32-wasip2 target
+      shell: bash
+      run: rustup target add wasm32-wasip2
