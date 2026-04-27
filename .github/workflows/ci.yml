@@ -27,6 +27,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: ./.github/actions/setup-pgrx-pg17
+
       - name: cargo fmt
         run: cargo fmt --all -- --check
 
@@ -49,39 +51,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install OS and PostgreSQL 17 build deps
-        run: |
-          set -euxo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            ca-certificates \
-            clang \
-            curl \
-            git \
-            gnupg \
-            libssl-dev \
-            lsb-release \
-            pkg-config
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL \
-            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-server-dev-17
-          # pgrx installs the extension into PG's share/lib dirs (root-owned on runners).
-          sudo mkdir -p /usr/share/postgresql/17/extension /usr/lib/postgresql/17/lib
-          sudo chown -R "$(id -un):$(id -gn)" \
-            /usr/share/postgresql/17/extension \
-            /usr/lib/postgresql/17/lib
-
-      - name: Install cargo-pgrx
-        run: cargo install cargo-pgrx --locked --version 0.18.0
-
-      - name: pgrx init (PG17)
-        run: cargo pgrx init --pg17 /usr/lib/postgresql/17/bin/pg_config
+      - uses: ./.github/actions/setup-pgrx-pg17
 
       - name: cargo pgrx test
         working-directory: pg_wasm

@@ -1,0 +1,48 @@
+name: Setup PostgreSQL 17 and pgrx
+description: >-
+  Install PG 17 from PGDG (server binaries + dev headers), prepare dirs for
+  extension install, install cargo-pgrx 0.18, and run pgrx init so PGRX_HOME
+  exists for pgrx-pg-sys builds.
+
+runs:
+  using: composite
+  steps:
+    - name: Install PostgreSQL 17 and build dependencies
+      shell: bash
+      run: |
+        set -euxo pipefail
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential \
+          ca-certificates \
+          clang \
+          curl \
+          git \
+          gnupg \
+          libssl-dev \
+          lsb-release \
+          pkg-config
+        sudo install -d /usr/share/postgresql-common/pgdg
+        sudo curl -fsSL \
+          -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+          https://www.postgresql.org/media/keys/ACCC4CF8.asc
+        echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+          | sudo tee /etc/apt/sources.list.d/pgdg.list
+        sudo apt-get update
+        # postgresql-server-dev-17: headers + pg_config for building extensions.
+        # postgresql-17: server binaries (initdb, postgres) required by cargo pgrx init.
+        sudo apt-get install -y --no-install-recommends \
+          postgresql-17 \
+          postgresql-server-dev-17
+        sudo mkdir -p /usr/share/postgresql/17/extension /usr/lib/postgresql/17/lib
+        sudo chown -R "$(id -un):$(id -gn)" \
+          /usr/share/postgresql/17/extension \
+          /usr/lib/postgresql/17/lib
+
+    - name: Install cargo-pgrx
+      shell: bash
+      run: cargo install cargo-pgrx --locked --version 0.18.0
+
+    - name: pgrx init (PG17)
+      shell: bash
+      run: cargo pgrx init --pg17 /usr/lib/postgresql/17/bin/pg_config
