@@ -1,0 +1,32 @@
+package pgwasm:host@0.1.0;
+
+interface log {
+    enum level { info, notice, warning }
+    log: func(level: level, message: string);
+}
+
+/// Read-only SQL via SPI. Unsupported result types are returned as `text`
+/// using PostgreSQL's type-output function (`pg_type_to_text`).
+interface query {
+    variant value {
+        null,
+        %bool(bool),
+        int(s64),
+        float(f64),
+        text(string),
+        bytea(list<u8>),
+    }
+    record row {
+        columns: list<value>,
+    }
+    record result-set {
+        column-names: list<string>,
+        rows: list<row>,
+    }
+    read: func(sql: string, params: list<value>) -> result<result-set, string>;
+}
+
+world host-only {
+    import log;
+    import query;
+}

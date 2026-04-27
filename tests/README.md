@@ -1,6 +1,6 @@
 # `tests` — workspace integration crate
 
-This crate exercises `pg_wasm` through **SQL only** using [`tokio-postgres`](https://docs.rs/tokio-postgres/) (no `pgrx` in the test binary).
+This crate exercises `pgwasm` through **SQL only** using [`tokio-postgres`](https://docs.rs/tokio-postgres/) (no `pgrx` in the test binary).
 
 ## Layout
 
@@ -15,7 +15,7 @@ Wasm fixtures are built in `build.rs`:
 
 - [`wasm-tools`](https://github.com/bytecodealliance/wasm-tools) on `PATH` (workspace uses the same major line as `wit-component` / `wasmtime`).
 - **`wasm32-wasip2` Rust target** (required to compile `http_search_guest` during `tests` builds): `rustup target add wasm32-wasip2`.
-- PostgreSQL with the `pg_wasm` extension available (typically `cargo pgrx install` / `cargo pgrx start` from the workspace root).
+- PostgreSQL with the `pgwasm` extension available (typically `cargo pgrx install` / `cargo pgrx start` from the workspace root).
 
 ## Running
 
@@ -34,7 +34,7 @@ With pgrx-managed Postgres, the client port is **`28800 + PostgreSQL major versi
 # From workspace root: install the extension for your pgrx PG version (include pg_test if you
 # built with --features pg17 pg_test), start Postgres, then run ignored tests on a single thread
 # (tests recreate the `pgwasm_itest` database):
-cd pg_wasm && cargo pgrx install --features "pg17 pg_test" --no-default-features && cd ..
+cd pgwasm && cargo pgrx install --features "pg17 pg_test" --no-default-features && cd ..
 cargo pgrx start || true
 export DATABASE_URL="postgres://localhost:$((28800 + 17))/pgwasm_itest"
 cargo test -p tests -- --ignored --test-threads=1
@@ -43,7 +43,7 @@ cargo test -p tests -- --ignored --test-threads=1
 CI-style one-liner (install extension, start if needed, run ignored tests):
 
 ```bash
-cd /path/to/pg_wasm/repo
+cd /path/to/pgwasm/repo
 cargo pgrx install --features "pg17 pg_test" --no-default-features && cargo pgrx start || true
 export DATABASE_URL="postgres://localhost:$((28800 + 17))/pgwasm_itest"
 cargo test -p tests -- --ignored --test-threads=1

@@ -4,12 +4,12 @@ use serde_json::json;
 
 use crate::common::{
     bootstrap_extension, connect, itest_component_wasm, load_options_with_limits_patch,
-    reset_integration_database, reset_pg_wasm_gucs, unique_suffix, wasm_fn_ident, wasm_load_bytes,
+    reset_integration_database, reset_pgwasm_gucs, unique_suffix, wasm_fn_ident, wasm_load_bytes,
     wasm_unload,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires DATABASE_URL to a cluster with pg_wasm installed (see tests/README.md)"]
+#[ignore = "requires DATABASE_URL to a cluster with pgwasm installed (see tests/README.md)"]
 async fn max_memory_pages_triggers_trap_or_resource_error() {
     reset_integration_database().await.unwrap();
     let suffix = unique_suffix();
@@ -17,7 +17,7 @@ async fn max_memory_pages_triggers_trap_or_resource_error() {
 
     let client = connect().await.unwrap();
     bootstrap_extension(&client).await.unwrap();
-    reset_pg_wasm_gucs(&client).await.unwrap();
+    reset_pgwasm_gucs(&client).await.unwrap();
 
     let options = load_options_with_limits_patch(json!({ "max_memory_pages": 1_i64 }));
     wasm_load_bytes(&client, &module_name, itest_component_wasm(), options)

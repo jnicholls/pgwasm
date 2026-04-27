@@ -1,0 +1,6 @@
+package test:write-query-guest;
+
+world guest {
+  import pgwasm:host/query@0.1.0;
+  export run: func() -> string;
+}

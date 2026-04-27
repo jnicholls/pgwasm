@@ -4,11 +4,11 @@ use serde_json::json;
 
 use crate::common::{
     bootstrap_extension, connect, itest_component_wasm, reset_integration_database,
-    reset_pg_wasm_gucs, unique_suffix, wasm_load_bytes,
+    reset_pgwasm_gucs, unique_suffix, wasm_load_bytes,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires DATABASE_URL to a cluster with pg_wasm installed (see tests/README.md)"]
+#[ignore = "requires DATABASE_URL to a cluster with pgwasm installed (see tests/README.md)"]
 async fn wasi_policy_widen_denied_at_load_maps_to_insufficient_privilege() {
     reset_integration_database().await.unwrap();
     let suffix = unique_suffix();
@@ -16,12 +16,12 @@ async fn wasi_policy_widen_denied_at_load_maps_to_insufficient_privilege() {
 
     let client = connect().await.unwrap();
     bootstrap_extension(&client).await.unwrap();
-    reset_pg_wasm_gucs(&client).await.unwrap();
+    reset_pgwasm_gucs(&client).await.unwrap();
     client
         .batch_execute(
             r"
-            SET pg_wasm.allow_wasi = on;
-            SET pg_wasm.allow_wasi_fs = off;
+            SET pgwasm.allow_wasi = on;
+            SET pgwasm.allow_wasi_fs = off;
             ",
         )
         .await

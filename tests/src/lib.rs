@@ -1,4 +1,4 @@
-//! Workspace integration tests for `pg_wasm` (tokio-postgres client, no pgrx).
+//! Workspace integration tests for `pgwasm` (tokio-postgres client, no pgrx).
 //!
 //! Tests are `#[ignore]` by default so `cargo test --workspace` succeeds without a live
 //! Postgres. Run against pgrx-managed Postgres with `DATABASE_URL=... cargo test -p tests -- --ignored`

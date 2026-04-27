@@ -4,12 +4,12 @@ use serde_json::json;
 
 use crate::common::{
     bootstrap_extension, connect, itest_component_wasm, load_options_with_limits_patch,
-    reset_integration_database, reset_pg_wasm_gucs, unique_suffix, wasm_fn_ident, wasm_load_bytes,
+    reset_integration_database, reset_pgwasm_gucs, unique_suffix, wasm_fn_ident, wasm_load_bytes,
     wasm_unload,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires DATABASE_URL to a cluster with pg_wasm installed (see tests/README.md)"]
+#[ignore = "requires DATABASE_URL to a cluster with pgwasm installed (see tests/README.md)"]
 async fn fuel_exhaustion_maps_to_program_limit_exceeded() {
     reset_integration_database().await.unwrap();
     let suffix = unique_suffix();
@@ -17,9 +17,9 @@ async fn fuel_exhaustion_maps_to_program_limit_exceeded() {
 
     let client = connect().await.unwrap();
     bootstrap_extension(&client).await.unwrap();
-    reset_pg_wasm_gucs(&client).await.unwrap();
+    reset_pgwasm_gucs(&client).await.unwrap();
     client
-        .execute("SET pg_wasm.fuel_enabled = on", &[])
+        .execute("SET pgwasm.fuel_enabled = on", &[])
         .await
         .unwrap();
 
@@ -46,5 +46,5 @@ async fn fuel_exhaustion_maps_to_program_limit_exceeded() {
     );
 
     wasm_unload(&client, &module_name).await.unwrap();
-    client.execute("RESET pg_wasm.fuel_enabled", &[]).await.ok();
+    client.execute("RESET pgwasm.fuel_enabled", &[]).await.ok();
 }

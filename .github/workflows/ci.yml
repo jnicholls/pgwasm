@@ -16,7 +16,7 @@ env:
 
 jobs:
   ci:
-    name: pg_wasm CI (fmt, clippy, test, pgrx test)
+    name: pgwasm CI (fmt, clippy, test, pgrx test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
         run: cargo test --workspace
 
       - name: cargo pgrx test
-        run: cargo pgrx test pg17 -p pg_wasm
+        run: cargo pgrx test pg17 -p pgwasm
 
       - name: cargo pgrx regress
-        run: cargo pgrx regress pg17 --resetdb -p pg_wasm
+        run: cargo pgrx regress pg17 --resetdb -p pgwasm

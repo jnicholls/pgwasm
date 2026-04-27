@@ -7,13 +7,13 @@ use serde_json::{Value, json};
 
 use crate::common::{
     bootstrap_extension, call_text, connect, http_search_component_wasm,
-    load_options_with_limits_patch, reset_integration_database, reset_pg_wasm_gucs, unique_suffix,
+    load_options_with_limits_patch, reset_integration_database, reset_pgwasm_gucs, unique_suffix,
     wasm_fn_ident, wasm_load_bytes, wasm_unload,
 };
 
 fn http_search_load_options() -> serde_json::Value {
     // Catalog `limits` must not exceed session GUC ceilings (`resolve_limit` in
-    // `pg_wasm` policy). Omit `fuel_per_invocation` (default fixture matches GUC).
+    // pgwasm policy). Omit `fuel_per_invocation` (default fixture matches GUC).
     load_options_with_limits_patch(json!({ "invocation_deadline_ms": 30_000_i64 }))
 }
 
@@ -31,16 +31,16 @@ async fn wasi_http_algolia_search_returns_titles() {
 
     let client = connect().await.unwrap();
     bootstrap_extension(&client).await.unwrap();
-    reset_pg_wasm_gucs(&client).await.unwrap();
+    reset_pgwasm_gucs(&client).await.unwrap();
 
     client
         .batch_execute(
             r"
-            SET pg_wasm.allow_wasi = on;
-            SET pg_wasm.allow_wasi_http = on;
-            SET pg_wasm.allow_wasi_net = on;
-            SET pg_wasm.allowed_hosts = 'hn.algolia.com:443';
-            SET pg_wasm.invocation_deadline_ms = 30000;
+            SET pgwasm.allow_wasi = on;
+            SET pgwasm.allow_wasi_http = on;
+            SET pgwasm.allow_wasi_net = on;
+            SET pgwasm.allowed_hosts = 'hn.algolia.com:443';
+            SET pgwasm.invocation_deadline_ms = 30000;
             ",
         )
         .await
@@ -97,16 +97,16 @@ async fn wasi_http_invocation_fails_when_allow_wasi_http_off() {
 
     let client = connect().await.unwrap();
     bootstrap_extension(&client).await.unwrap();
-    reset_pg_wasm_gucs(&client).await.unwrap();
+    reset_pgwasm_gucs(&client).await.unwrap();
 
     client
         .batch_execute(
             r"
-            SET pg_wasm.allow_wasi = on;
-            SET pg_wasm.allow_wasi_http = off;
-            SET pg_wasm.allow_wasi_net = on;
-            SET pg_wasm.allowed_hosts = 'hn.algolia.com:443';
-            SET pg_wasm.invocation_deadline_ms = 30000;
+            SET pgwasm.allow_wasi = on;
+            SET pgwasm.allow_wasi_http = off;
+            SET pgwasm.allow_wasi_net = on;
+            SET pgwasm.allowed_hosts = 'hn.algolia.com:443';
+            SET pgwasm.invocation_deadline_ms = 30000;
             ",
         )
         .await

@@ -1,4 +1,4 @@
-//! WASIp2 guest: outbound HTTPS GET + JSON body (integration fixture for `pg_wasm`).
+//! WASIp2 guest: outbound HTTPS GET + JSON body (integration fixture for `pgwasm`).
 
 wit_bindgen::generate!({
     path: "wit",

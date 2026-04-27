@@ -4,37 +4,37 @@ overview: Rename the PostgreSQL extension, crate directory, default schema, GUCs
 todos:
   - id: workspace-crate-rename
     content: Rename pg_wasm directory to pgwasm; update Cargo.toml members, AGENTS.md, .cursor rules, CI, README paths, cargo -p pgwasm, path dependencies.
-    status: pending
+    status: completed
   - id: extension-metadata
     content: pgwasm.control, pgwasm--*.sql bootstrap, extension_sql_file path, extname pgwasm and get_extension_oid lookups everywhere.
-    status: pending
+    status: completed
   - id: trampoline-prosrc
     content: Align proc_reg libdir path, trampoline C symbol, and prosrc filters with pgrx output for crate pgwasm.
-    status: pending
+    status: completed
   - id: constant-schema
     content: Single EXTENSION_SCHEMA pgwasm; replace catalog SPI literals, migration shape checks, wit/udt, lifecycle, composite tests.
-    status: pending
+    status: completed
   - id: gucs
     content: guc.rs register pgwasm.* only; update descriptions to reference pgwasm extension and pgwasm_* SQL functions.
-    status: pending
+    status: completed
   - id: sql-functions
     content: pg_extern name pgwasm_* for lifecycle, views, test hooks, core invoke; views.rs view SQL; hello_pg_wasm to hello_pgwasm or remove.
-    status: pending
+    status: completed
   - id: roles-artifacts-shmem
     content: Roles pgwasm_loader and pgwasm_reader; ARTIFACTS_DIRNAME and PGDATA/pgwasm; shmem and LWLock C names pgwasm.*; artifact lock prefixes if needed.
-    status: pending
+    status: completed
   - id: wit-host-package
     content: WIT package pg-wasm host to pgwasm host; regenerate bindings; QUERY_HOST_IMPORT_SUBSTR; guest fixtures and wit-mapping docs.
-    status: pending
+    status: completed
   - id: composite-type-prefix
     content: Composite type prefix pg_wasm_tuple_ to pgwasm_tuple_ and similar SQL identifiers.
-    status: pending
+    status: completed
   - id: hints-tests-docs
     content: Rust errors, hooks, lib.rs pg_tests, regress sql and expected, generate_pg_regress_sql.py, tests/src, fixture READMEs, docs.
-    status: pending
+    status: completed
   - id: verify
     content: cargo fmt, check, clippy, cargo test --workspace, cargo pgrx test pg17 -p pgwasm, cargo pgrx regress from pgwasm directory.
-    status: pending
+    status: completed
 isProject: false
 ---
 

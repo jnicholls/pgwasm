@@ -1,4 +1,4 @@
-//! Shared helpers for tokio-postgres integration tests against `pg_wasm`.
+//! Shared helpers for tokio-postgres integration tests against `pgwasm`.
 
 use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -75,32 +75,32 @@ pub(crate) async fn bootstrap_extension(client: &Client) -> Result<()> {
     client
         .batch_execute(
             r"
-            DROP EXTENSION IF EXISTS pg_wasm CASCADE;
-            CREATE EXTENSION pg_wasm;
+            DROP EXTENSION IF EXISTS pgwasm CASCADE;
+            CREATE EXTENSION pgwasm;
             ",
         )
         .await
-        .context("bootstrap pg_wasm extension")?;
+        .context("bootstrap pgwasm extension")?;
     Ok(())
 }
 
-pub(crate) async fn reset_pg_wasm_gucs(client: &Client) -> Result<()> {
+pub(crate) async fn reset_pgwasm_gucs(client: &Client) -> Result<()> {
     client
         .batch_execute(
             r"
-            RESET pg_wasm.allow_wasi;
-            RESET pg_wasm.allow_wasi_fs;
-            RESET pg_wasm.allow_wasi_http;
-            RESET pg_wasm.allow_wasi_net;
-            RESET pg_wasm.allow_wasi_stdio;
-            RESET pg_wasm.allowed_hosts;
-            RESET pg_wasm.wasi_preopens;
-            RESET pg_wasm.fuel_enabled;
-            RESET pg_wasm.invocation_deadline_ms;
+            RESET pgwasm.allow_wasi;
+            RESET pgwasm.allow_wasi_fs;
+            RESET pgwasm.allow_wasi_http;
+            RESET pgwasm.allow_wasi_net;
+            RESET pgwasm.allow_wasi_stdio;
+            RESET pgwasm.allowed_hosts;
+            RESET pgwasm.wasi_preopens;
+            RESET pgwasm.fuel_enabled;
+            RESET pgwasm.invocation_deadline_ms;
             ",
         )
         .await
-        .context("reset pg_wasm GUCs")?;
+        .context("reset pgwasm GUCs")?;
     Ok(())
 }
 
@@ -108,7 +108,7 @@ pub(crate) fn wasm_hex_literal(wasm: &[u8]) -> String {
     hex::encode(wasm)
 }
 
-/// `wasm.load(name, json_build_object('bytes', $hex_text), options)` where `$hex_text` is a hex string.
+/// `pgwasm.pgwasm_load(name, json_build_object('bytes', $hex_text), options)` where `$hex_text` is a hex string.
 pub(crate) async fn wasm_load_bytes(
     client: &Client,
     module_name: &str,
@@ -117,26 +117,29 @@ pub(crate) async fn wasm_load_bytes(
 ) -> Result<()> {
     let hex = wasm_hex_literal(wasm);
     let options_text = serde_json::to_string(&options)
-        .with_context(|| format!("serialize wasm.load options for {module_name}"))?;
+        .with_context(|| format!("serialize pgwasm.pgwasm_load options for {module_name}"))?;
     client
         .execute(
-            "SELECT wasm.load($1::text, json_build_object('bytes', $2::text), $3::text::json)",
+            "SELECT pgwasm.pgwasm_load($1::text, json_build_object('bytes', $2::text), $3::text::json)",
             &[&module_name, &hex.as_str(), &options_text],
         )
         .await
-        .with_context(|| format!("wasm.load({module_name})"))?;
+        .with_context(|| format!("pgwasm.pgwasm_load({module_name})"))?;
     Ok(())
 }
 
 pub(crate) async fn wasm_unload(client: &Client, module_name: &str) -> Result<()> {
     client
-        .execute("SELECT wasm.unload($1::text, true)", &[&module_name])
+        .execute(
+            "SELECT pgwasm.pgwasm_unload($1::text, true)",
+            &[&module_name],
+        )
         .await
-        .with_context(|| format!("wasm.unload({module_name})"))?;
+        .with_context(|| format!("pgwasm.pgwasm_unload({module_name})"))?;
     Ok(())
 }
 
-/// Match `pg_wasm`'s `sanitize_sql_identifier` for export keys (e.g. `spin-param` → `spin_param`).
+/// Match `pgwasm`'s `sanitize_sql_identifier` for export keys (e.g. `spin-param` → `spin_param`).
 pub(crate) fn sanitize_export_sql_name(export_key: &str) -> String {
     let mut t = export_key.replace(['/', '-'], "_");
     if t.is_empty() {
@@ -163,7 +166,7 @@ pub(crate) async fn call_i32(
     export_sql_name: &str,
 ) -> Result<i32> {
     let ident = wasm_fn_ident(module_name, export_sql_name);
-    let sql = format!(r#"SELECT wasm."{}"()"#, ident.replace('"', "\"\""));
+    let sql = format!(r#"SELECT pgwasm."{}"()"#, ident.replace('"', "\"\""));
     let row = client.query_one(&sql, &[]).await?;
     let v: i32 = row.get(0);
     Ok(v)
@@ -175,7 +178,7 @@ pub(crate) async fn call_text(
     export_sql_name: &str,
 ) -> Result<String> {
     let ident = wasm_fn_ident(module_name, export_sql_name);
-    let sql = format!(r#"SELECT wasm."{}"()"#, ident.replace('"', "\"\""));
+    let sql = format!(r#"SELECT pgwasm."{}"()"#, ident.replace('"', "\"\""));
     let row = client.query_one(&sql, &[]).await?;
     let v: String = row.get(0);
     Ok(v)

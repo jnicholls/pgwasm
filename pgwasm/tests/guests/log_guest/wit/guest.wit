@@ -1,0 +1,6 @@
+package test:log-guest;
+
+world guest {
+  import pgwasm:host/log@0.1.0;
+  export run: func();
+}

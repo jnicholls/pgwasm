@@ -1,13 +1,13 @@
-# pg_wasm architecture
+# pgwasm architecture
 
-This document is the **v2 architectural design** for `pg_wasm`, a PostgreSQL
+This document is the **v2 architectural design** for `pgwasm`, a PostgreSQL
 extension that binds WebAssembly modules and components to SQL-visible
 functions. It is written for engineers contributing to the extension and for
 operators who need to reason about isolation, resource control, and
 introspection.
 
-SQL objects live in the extension schema (`wasm` by default, from
-`pg_wasm.control`); configuration parameters keep the `pg_wasm.*` prefix.
+SQL objects live in the extension schema (`pgwasm` by default, from
+`pgwasm.control`); configuration parameters keep the `pgwasm.*` prefix.
 
 ---
 
@@ -29,8 +29,8 @@ SQL objects live in the extension schema (`wasm` by default, from
 - **Strong, layered sandbox.** WASI and host capabilities are off by default.
   Administrators enable them through GUCs at extension scope; module loaders
   can further **narrow** (never broaden) those defaults per module.
-- **Lifecycle in SQL.** `wasm.load`, `wasm.unload`, `wasm.reload`,
-  and `wasm.reconfigure` are first-class SQL functions. Administrative
+- **Lifecycle in SQL.** `pgwasm.pgwasm_load`, `pgwasm.pgwasm_unload`, `pgwasm.pgwasm_reload`,
+  and `pgwasm.pgwasm_reconfigure` are first-class SQL functions. Administrative
   state is durable across PostgreSQL restarts.
 - **Observability.** Per-module and per-function counters, timings, errors,
   and resource snapshots are visible through SQL views.
@@ -53,14 +53,14 @@ SQL objects live in the extension schema (`wasm` by default, from
 ```mermaid
 flowchart TB
   subgraph SQL["PostgreSQL"]
-    API["wasm.load / unload / reload / reconfigure"]
+    API["pgwasm_load / unload / reload / reconfigure"]
     UDF["schema.prefix_export(...)"]
-    Views["wasm.modules / functions / stats / types"]
+    Views["pgwasm_modules / functions / stats / types"]
     Catalog["pg_proc, pg_type, pg_depend"]
   end
 
   subgraph BackendProcess["One PostgreSQL backend"]
-    Tramp["pg_wasm_udf_trampoline (C symbol)"]
+    Tramp["pgwasm_udf_trampoline (C symbol)"]
     LocalReg["Backend-local registry cache"]
     Engine["wasmtime::Engine (shared, lazy)"]
     Store["Per-call wasmtime::Store"]
@@ -68,9 +68,9 @@ flowchart TB
   end
 
   subgraph ClusterState["Cluster state"]
-    Shmem["pg_wasm shared memory (metrics, registry generation)"]
+    Shmem["pgwasm shared memory (metrics, registry generation)"]
     CatalogTables["extension-schema catalog tables: modules, exports, wit_types, policies"]
-    Fs["$PGDATA/pg_wasm/ (compiled artifacts, WIT text)"]
+    Fs["$PGDATA/pgwasm/ (compiled artifacts, WIT text)"]
   end
 
   API --> CatalogTables
@@ -89,7 +89,7 @@ flowchart TB
 
 The key insights:
 
-1. **One trampoline symbol** backs every `pg_proc` row created by `pg_wasm`.
+1. **One trampoline symbol** backs every `pg_proc` row created by `pgwasm`.
    The trampoline resolves `(module_id, export)` from `flinfo->fn_oid` and
    dispatches into the runtime.
 2. **Persistent catalog + on-disk artifacts** make module identity durable.
@@ -105,13 +105,12 @@ The key insights:
 ## 3. Repository layout (current)
 
 ```text
-pg_wasm/
+pgwasm/
   Cargo.toml
   build.rs
-  pg_wasm.control
+  pgwasm.control
   sql/                               # versioned SQL: catalog DDL, upgrades
-    pg_wasm--0.1.0.sql
-    pg_wasm--0.1.0--0.1.1.sql
+    pgwasm--0.1.0.sql
   wit/                               # host WIT (path for bindgen in runtime/host)
     host.wit
   fixtures/                          # guest components + core WAT for regress / build
@@ -122,7 +121,7 @@ pg_wasm/
     guc.rs                           # GUC definitions
     errors.rs                        # PgWasmError + conversions
     catalog.rs                       # durable cluster state (SPI + nested modules)
-    artifacts.rs                     # $PGDATA/pg_wasm/ layout and IO
+    artifacts.rs                     # $PGDATA/pgwasm/ layout and IO
     shmem.rs                         # shared-memory segment + metrics
     registry.rs                      # process-local fn_oid / module export cache
     config.rs                        # LoadOptions, PolicyOverrides, Limits
@@ -139,7 +138,7 @@ pg_wasm/
       component.rs                   # component compile + instantiate; StoreLimits; WASI/linker (see §6)
       core.rs                        # core-module compile + instantiate
       pool.rs                        # per-module instance pool
-      host.rs                        # pg_wasm:host imports (pgrx backend)
+      host.rs                        # pgwasm:host imports (pgrx backend)
       host_stub.rs                   # host.rs replacement for host-only cargo test
     mapping/
       mod.rs
@@ -147,7 +146,7 @@ pg_wasm/
       composite.rs                   # record / tuple / variant / enum / flags
       list.rs                        # list<T> / option<T> / result<T,E>
     proc_reg.rs                      # ProcedureCreate / RemoveFunctionById
-    trampoline.rs                    # pg_wasm_udf_trampoline C entry point
+    trampoline.rs                    # pgwasm_udf_trampoline C entry point
     lifecycle/
       mod.rs
       load.rs
@@ -185,15 +184,15 @@ implemented in the tree yet.
 ### 4.1 Catalog tables
 
 All state that must survive PostgreSQL restarts lives in regular PostgreSQL
-tables created in the extension's schema (`pg_wasm`). These tables are owned
+tables created in the extension's schema (`pgwasm`). These tables are owned
 by the extension and participate in `DROP EXTENSION ... CASCADE` cleanup.
 
 | Table | Columns (abridged) | Purpose |
 |-------|--------------------|---------|
-| `wasm.modules` | `module_id bigserial pk`, `name text unique`, `abi text`, `wasm_sha256 bytea`, `artifact_path text`, `wit_world text`, `policy jsonb`, `limits jsonb`, `created_at`, `updated_at`, `generation bigint` | One row per loaded module. `wit_world` stores the textual WIT world interface; `policy`/`limits` are the merged module-scoped overrides. |
-| `wasm.exports` | `export_id bigserial pk`, `module_id fk`, `wasm_name text`, `sql_name text`, `signature jsonb`, `fn_oid oid`, `kind text` | One row per SQL-visible export. `signature` is the normalized WIT signature used to rebuild marshaling code. |
-| `wasm.wit_types` | `wit_type_id bigserial pk`, `module_id fk`, `wit_name text`, `pg_type_oid oid`, `kind text` (`record`, `variant`, `enum`, `flags`, `domain`), `definition jsonb` | One row per UDT / enum / flags / domain registered in the PG catalog on behalf of this module. |
-| `wasm.dependencies` | `module_id fk`, `depends_on_module_id fk` | Used when WIT types are reused across modules (see §6.3). |
+| `pgwasm.modules` | `module_id bigserial pk`, `name text unique`, `abi text`, `wasm_sha256 bytea`, `artifact_path text`, `wit_world text`, `policy jsonb`, `limits jsonb`, `created_at`, `updated_at`, `generation bigint` | One row per loaded module. `wit_world` stores the textual WIT world interface; `policy`/`limits` are the merged module-scoped overrides. |
+| `pgwasm.exports` | `export_id bigserial pk`, `module_id fk`, `wasm_name text`, `sql_name text`, `signature jsonb`, `fn_oid oid`, `kind text` | One row per SQL-visible export. `signature` is the normalized WIT signature used to rebuild marshaling code. |
+| `pgwasm.wit_types` | `wit_type_id bigserial pk`, `module_id fk`, `wit_name text`, `pg_type_oid oid`, `kind text` (`record`, `variant`, `enum`, `flags`, `domain`), `definition jsonb` | One row per UDT / enum / flags / domain registered in the PG catalog on behalf of this module. |
+| `pgwasm.dependencies` | `module_id fk`, `depends_on_module_id fk` | Used when WIT types are reused across modules (see §6.3). |
 
 All tables are regular (not unlogged, not temporary): we want WAL coverage so
 that replication reproduces the extension state.
@@ -201,7 +200,7 @@ that replication reproduces the extension state.
 ### 4.2 On-disk artifacts
 
 Compiled artifacts and the original WASM bytes live under
-`$PGDATA/pg_wasm/<module_id>/`:
+`$PGDATA/pgwasm/<module_id>/`:
 
 - `module.wasm` — original bytes (for reload-from-catalog and auditing).
 - `module.cwasm` — Wasmtime AOT-precompiled artifact
@@ -217,7 +216,7 @@ extension never trusts catalog rows without a matching checksum on disk.
 
 ### 4.3 Shared memory
 
-`pg_wasm` requests a fixed-size shared memory segment in
+`pgwasm` requests a fixed-size shared memory segment in
 `shmem_request_hook`. It holds:
 
 - A `u64` **generation counter**. `load`, `unload`, `reload`, and
@@ -233,7 +232,7 @@ extension never trusts catalog rows without a matching checksum on disk.
 The segment is sized by fixed compile-time constants in `shmem.rs`
 (`SHMEM_MODULE_SLOTS = 256`, `SHMEM_EXPORT_SLOTS = 4096`). If more modules
 than capacity are loaded, the
-excess gets dynamic (non-shared) counters and `wasm.stats` reports
+excess gets dynamic (non-shared) counters and `pgwasm.pgwasm_stats()` reports
 `shared := false` for those rows; this is a degraded mode, not an error.
 
 ---
@@ -242,36 +241,36 @@ excess gets dynamic (non-shared) counters and `wasm.stats` reports
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Loaded: wasm.load()
-  Loaded --> Reconfigured: wasm.reconfigure()
+  [*] --> Loaded: pgwasm.pgwasm_load()
+  Loaded --> Reconfigured: pgwasm.pgwasm_reconfigure()
   Reconfigured --> Reconfigured
-  Loaded --> Reloaded: wasm.reload()
+  Loaded --> Reloaded: pgwasm.pgwasm_reload()
   Reconfigured --> Reloaded
   Reloaded --> Reloaded
-  Loaded --> Unloaded: wasm.unload()
+  Loaded --> Unloaded: pgwasm.pgwasm_unload()
   Reconfigured --> Unloaded
   Reloaded --> Unloaded
   Unloaded --> [*]
 ```
 
-### 5.1 `wasm.load(source, name, options)`
+### 5.1 `pgwasm.pgwasm_load(source, name, options)`
 
 Two overloads converge on `load::from_bytes`:
 
 ```sql
-wasm.load(wasm bytea,  name text default null, options jsonb default null) returns bigint
-wasm.load(path text,   name text default null, options jsonb default null) returns bigint
+pgwasm.pgwasm_load(wasm bytea,  name text default null, options jsonb default null) returns bigint
+pgwasm.pgwasm_load(path text,   name text default null, options jsonb default null) returns bigint
 ```
 
 Steps, in order (all inside one explicit transaction block so partial state
 is rolled back on failure):
 
-1. **AuthZ.** Require superuser *or* a member of the `pg_wasm_loader` role
+1. **AuthZ.** Require superuser *or* a member of the `pgwasm_loader` role
    (created by the extension SQL). Path-based load additionally requires
-   `pg_wasm.allow_load_from_file = on`.
+   `pgwasm.allow_load_from_file = on`.
 2. **Read bytes.** For `text` overload, resolve the path against
-   `pg_wasm.module_path` and reject if outside `pg_wasm.allowed_path_prefixes`
-   after canonicalization. Enforce `pg_wasm.max_module_bytes`.
+   `pgwasm.module_path` and reject if outside `pgwasm.allowed_path_prefixes`
+   after canonicalization. Enforce `pgwasm.max_module_bytes`.
 3. **Validate.** `wasmparser::validate` the whole binary. This rejects
    malformed input before Wasmtime ever sees it.
 4. **Classify ABI.** `abi::detect` returns `Component` or `Core`. An
@@ -284,7 +283,7 @@ is rolled back on failure):
     - If the type is already registered for this module (reload path) and its
       definition is unchanged, reuse the existing `pg_type.oid`.
     - Else, synthesize the PG `CREATE TYPE` / `CREATE DOMAIN` DDL and run it,
-      recording rows in `wasm.wit_types` and `recordDependencyOn`.
+      recording rows in `pgwasm.wit_types` and `recordDependencyOn`.
 7. **Plan exports.** Each exported function maps to one `pg_proc` row using
    the trampoline symbol. Function names follow `<prefix>_<export>` where
    `prefix` is `name` or the slugified WIT world name. Reject name
@@ -294,10 +293,10 @@ is rolled back on failure):
    (see §7).
 9. **Compile.** Build a shared `wasmtime::Engine` (see §6.1). Call
    `Engine::precompile_component` (or `_module`), persist the `.cwasm` and
-   `.wasm` under `$PGDATA/pg_wasm/<module_id>/`, and keep the compiled
+   `.wasm` under `$PGDATA/pgwasm/<module_id>/`, and keep the compiled
    `Component` / `Module` in the process-local registry.
 10. **Register procs.** For each planned export call `ProcedureCreate` (via
-    `proc_reg.rs`). Record `fn_oid` in `pg_wasm.exports` and the local
+    `proc_reg.rs`). Record `fn_oid` in `pgwasm.exports` and the local
     `FN_OID_MAP`.
 11. **Hooks.** If the component exports `on-load`, instantiate once and call
     it with the module's config blob (JSON-encoded). Failure aborts the load.
@@ -308,21 +307,21 @@ All of this runs inside one SPI transaction; a failure at any step issues
 `ereport(ERROR)` and the SQL-level rollback cleans catalog rows, and a
 best-effort cleanup removes on-disk artifacts.
 
-### 5.2 `wasm.unload(module_id)`
+### 5.2 `pgwasm.pgwasm_unload(module_id)`
 
 1. AuthZ as above.
 2. Call `on-unload` hook (best-effort; hook failure is logged, not fatal).
-3. `RemoveFunctionById` for every `pg_proc.oid` in `pg_wasm.exports`.
+3. `RemoveFunctionById` for every `pg_proc.oid` in `pgwasm.exports`.
 4. Drop registered WIT types. Respect dependencies: if another module
    references a WIT type (see §6.3), refuse the unload unless
    `options.cascade = true`, in which case dependent modules are unloaded
    first.
-5. Delete rows from `wasm.exports`, `wasm.wit_types`, `wasm.modules`.
-6. Remove `$PGDATA/pg_wasm/<module_id>/`.
+5. Delete rows from `pgwasm.exports`, `pgwasm.wit_types`, `pgwasm.modules`.
+6. Remove `$PGDATA/pgwasm/<module_id>/`.
 7. Bump generation. Backends drop their local `ModuleHandle` on next trampoline
    entry that sees a removed module.
 
-### 5.3 `wasm.reload(module_id, source := null, options := null)`
+### 5.3 `pgwasm.pgwasm_reload(module_id, source := null, options := null)`
 
 Reload replaces the module's **bytes** (and therefore exports and WIT types)
 without destroying its SQL identity when possible. It runs as unload+load
@@ -342,10 +341,10 @@ If `source` is `null`, reload reads `module.wasm` from disk (useful for
 re-compiling after a Wasmtime upgrade). If provided, the new bytes replace
 `module.wasm` atomically (temp-file + rename).
 
-### 5.4 `wasm.reconfigure(module_id, options)`
+### 5.4 `pgwasm.pgwasm_reconfigure(module_id, options)`
 
 Reconfigure **does not touch code or types**. It updates `policy` and
-`limits` in `wasm.modules`, re-computes the `EffectivePolicy`, and bumps
+`limits` in `pgwasm.modules`, re-computes the `EffectivePolicy`, and bumps
 the generation. The next instantiation in each backend picks up the new
 values. If the component exports `on-reconfigure`, it is called with the new
 config blob before the generation bump completes.
@@ -370,12 +369,12 @@ from a `wasmtime::Config` configured with the v43 builder-style API:
   are configured with `Store::set_epoch_deadline` before each call and the
   default expiration action (`Store::epoch_deadline_trap`) is kept so a
   missed deadline produces `Trap::Interrupt`.
-- `Config::consume_fuel(pg_wasm.fuel_enabled)` to enable deterministic
+- `Config::consume_fuel` when the `pgwasm.fuel_enabled` GUC is on, to enable deterministic
   per-call fuel budgets. When enabled we call `Store::set_fuel` at the start
   of each invocation and read `Store::get_fuel` afterwards for metrics.
 - `Config::cache(None)` — we do not opt into Wasmtime's built-in module
   cache and instead manage our own precompiled artifacts in
-  `$PGDATA/pg_wasm/`. (The legacy `Config::cache_config_load_default` method
+  `$PGDATA/pgwasm/`. (The legacy `Config::cache_config_load_default` method
   from pre-v43 is gone; the `Cache` object is now passed explicitly and
   `None` means "disabled", which is also the default.)
 - `Config::parallel_compilation(false)` to keep compile cost predictable
@@ -383,7 +382,7 @@ from a `wasmtime::Config` configured with the v43 builder-style API:
   pulls in rayon and fights the scheduler during large regression runs).
 - **No** `Config::async_support` call. That method was deprecated in
   Wasmtime 43 (`#[doc(hidden)]`, no-op). Store async is now inferred from
-  the APIs the store uses; for pg_wasm we stay synchronous and always call
+  the APIs the store uses; for pgwasm we stay synchronous and always call
   `Func::call` / `TypedFunc::call` rather than their `_async` variants.
 
 Other settings we deliberately leave at their defaults: `wasm_backtrace`
@@ -392,7 +391,7 @@ memory, reference types, multi-value, and the other stable proposals.
 
 The engine is shared across all modules loaded into a single backend. A
 dedicated OS thread drives `Engine::increment_epoch` at
-`pg_wasm.epoch_tick_ms` resolution (default 10 ms). The thread is started
+`pgwasm.epoch_tick_ms` resolution (default 10 ms). The thread is started
 once via `std::sync::OnceLock`, holds an `EngineWeak` obtained from
 `Engine::weak` (not a strong `Engine` clone), and `EngineWeak::upgrade`s on
 each tick so it exits naturally once the last `Engine` reference in the
@@ -401,12 +400,12 @@ resources; `Engine::increment_epoch` is signal-safe per its documentation.
 
 ### 6.2 Compile and cache
 
-Compilation happens in `wasm.load`. The resulting `Component` (or
+Compilation happens in `pgwasm.pgwasm_load`. The resulting `Component` (or
 `Module`) is stored in two places:
 
 1. **Process-local** `registry::MODULES` as a `ModuleHandle` wrapping the
    `Component` and any prepared `Linker`s.
-2. **On disk** at `$PGDATA/pg_wasm/<module_id>/module.cwasm` via
+2. **On disk** at `$PGDATA/pgwasm/<module_id>/module.cwasm` via
    `Engine::precompile_component` (or `Engine::precompile_module` for core
    modules), so cold backends can deserialize via
    `unsafe { Component::deserialize_file(&engine, &cwasm_path) }`
@@ -441,9 +440,9 @@ wired via `wasmtime_wasi_http::p2::add_to_linker_sync` with a companion
 
 | Import | Source (v43) | Controlled by |
 |--------|--------------|---------------|
-| `wasi:cli/*`, `wasi:io/*`, `wasi:clocks/*`, `wasi:random/*`, `wasi:filesystem/*`, `wasi:sockets/*` | `wasmtime_wasi::p2::add_to_linker_sync` + `WasiCtxBuilder` | `pg_wasm.allow_wasi_*` GUCs; filesystem preopens via `WasiCtxBuilder::preopened_dir`; sockets gated on `pg_wasm.allow_wasi_net`/`allowed_hosts` |
-| `wasi:http/*` | `wasmtime_wasi_http::p2::add_to_linker_sync` | `pg_wasm.allow_wasi_http` |
-| `pg_wasm:host/log`, `pg_wasm:host/query` | implemented in-process via `Linker::root().func_wrap(...)` | always on (subject to policy) |
+| `wasi:cli/*`, `wasi:io/*`, `wasi:clocks/*`, `wasi:random/*`, `wasi:filesystem/*`, `wasi:sockets/*` | `wasmtime_wasi::p2::add_to_linker_sync` + `WasiCtxBuilder` | `pgwasm.allow_wasi_*` GUCs; filesystem preopens via `WasiCtxBuilder::preopened_dir`; sockets gated on `pgwasm.allow_wasi_net`/`allowed_hosts` |
+| `wasi:http/*` | `wasmtime_wasi_http::p2::add_to_linker_sync` | `pgwasm.allow_wasi_http` |
+| `pgwasm:host/log`, `pgwasm:host/query` | implemented in-process via `Linker::root().func_wrap(...)` | always on (subject to policy) |
 
 If a capability GUC is off, we skip the corresponding `add_to_linker_sync`
 call, which makes guest imports for that interface fail at instantiate time
@@ -453,8 +452,8 @@ generated bindings (e.g. `wasmtime_wasi::p2::bindings::filesystem::types::add_to
 can be used to opt into individual interfaces without opting into the
 whole `wasi:cli/imports` world.
 
-The `pg_wasm:host/query` interface lets a module issue SPI queries back into
-the executing backend (subject to `pg_wasm.allow_spi` and the caller's
+The `pgwasm:host/query` interface lets a module issue SPI queries back into
+the executing backend (subject to `pgwasm.allow_spi` and the caller's
 current role). This is how a WASM UDF can read related rows during its call.
 
 ### 6.4 Instance pool
@@ -464,7 +463,7 @@ components are cheap to **instantiate** once compiled, but not free (we pay
 for `ResourceTable` initialization and host-state copies). For hot exports
 (scalar functions, small records), we amortize by reusing instances across
 invocations **within a single backend**, drawn from a pool sized by
-`pg_wasm.instances_per_module` (default 1).
+`pgwasm.instances_per_module` (default 1).
 
 Each call sequence:
 
@@ -476,7 +475,7 @@ Each call sequence:
    `StoreLimitsBuilder` and attached with `Store::limiter`; set the per-call
    fuel budget with `Store::set_fuel` (when fuel is enabled); and set the
    epoch deadline with `Store::set_epoch_deadline` (ticks computed from
-   `pg_wasm.invocation_deadline_ms / pg_wasm.epoch_tick_ms`).
+   `pgwasm.invocation_deadline_ms / pgwasm.epoch_tick_ms`).
 3. Invoke the typed export. For the dynamic path we use
    `wasmtime::component::Func::call(&mut store, &params, &mut results)`
    with slices of `component::Val` (the v43 API takes a result buffer
@@ -507,7 +506,7 @@ the component path.
 ### 7.1 GUCs
 
 All GUCs are declared in `guc.rs` and registered in `_PG_init`. Names below
-are `pg_wasm.*`.
+are `pgwasm.*`.
 
 | GUC | Kind | Default | Notes |
 |-----|------|---------|-------|
@@ -524,7 +523,7 @@ are `pg_wasm.*`.
 | `allow_wasi_net` | bool | `off` | TCP/UDP sockets. |
 | `allowed_hosts` | string | `''` | `host:port` CIDR-ish list. |
 | `allow_wasi_http` | bool | `off` | `wasi:http` imports. |
-| `allow_spi` | bool | `off` | Expose `pg_wasm:host/query`. |
+| `allow_spi` | bool | `off` | Expose `pgwasm:host/query`. |
 | `max_memory_pages` | int | `1024` | 64 MiB per instance. |
 | `max_instances_total` | int | `0` | `0` = unbounded process-wide. |
 | `instances_per_module` | int | `1` | Size of the per-backend per-module instance pool (§6.4). |
@@ -621,7 +620,7 @@ of an internal duplicate.
 | `list<T>` | array of the PG mapping of `T`, using `T[]` when `T` is a simple scalar; otherwise a domain over `jsonb` for irregular element types |
 | `option<T>` | nullable column of the PG mapping of `T` |
 | `result<T, E>` | composite `(ok T?, err E?)` or `jsonb` when `E` is a complex variant |
-| `tuple<A, B, ...>` | anonymous `record(A, B, ...)` registered as a composite type named `pg_wasm_tuple_<hash>` |
+| `tuple<A, B, ...>` | anonymous `record(A, B, ...)` registered as a composite type named `pgwasm.m<module_id>_<type_key>` (stable key derived from the WIT shape) |
 | `record { a: A; b: B; ... }` | named composite type (UDT) |
 | `variant { Foo(A), Bar, ... }` | composite type `(tag text, foo A, bar boolean default false)` or tagged `jsonb` if the variant is recursive |
 | `enum { Red, Green, Blue }` | PG enum type |
@@ -636,7 +635,7 @@ and validates compatibility.
 
 ### 8.2 UDT registration
 
-`wit::udt::register_type_plan` runs DDL via SPI during `wasm.load`:
+`wit::udt::register_type_plan` runs DDL via SPI during `pgwasm.pgwasm_load`:
 
 - `CREATE TYPE <module_prefix>_<record> AS (...)` for records and tuples.
 - `CREATE TYPE <module_prefix>_<enum> AS ENUM (...)` for enums.
@@ -645,7 +644,7 @@ and validates compatibility.
 - `recordDependencyOn(type_oid, extension_oid, DEPENDENCY_EXTENSION)` so
   `DROP EXTENSION` cleans up.
 
-Type OIDs are persisted in `wasm.wit_types`. On reload with unchanged
+Type OIDs are persisted in `pgwasm.wit_types`. On reload with unchanged
 definitions, we reuse them; on breaking changes we drop and recreate behind
 the opt-in flag (§5.3).
 
@@ -662,7 +661,7 @@ code paths:
   WIT type tree and pairs it with the `TupleDesc` / Oid of the corresponding
   PG type. This is slower but fully general and the default.
 
-A single `pg_wasm:host/json` interface lets a component opt into passing
+A single `pgwasm:host/json` interface lets a component opt into passing
 arbitrary structured data as `jsonb`; this is what `record as JSON` means in
 v1 terms, retained as an escape hatch.
 
@@ -679,13 +678,13 @@ world are rejected at load time.
 Two companion documents extract the operational surface of this design
 into flat reference tables:
 
-- [`docs/guc.md`](guc.md) — every `pg_wasm.*` GUC with its type, default,
+- [`docs/guc.md`](guc.md) — every `pgwasm.*` GUC with its type, default,
   `GucContext` scope, and hot/cold reconfiguration semantics. Use it as
   the authoritative cheatsheet for `postgresql.conf` and
   `ALTER SYSTEM SET` work.
 - [`docs/wit-mapping.md`](wit-mapping.md) — the canonical WIT →
   PostgreSQL type table (this section, expanded) with a WIT fragment, the
-  DDL `wasm.load` issues, and a sample `SELECT` for every primitive,
+  DDL `pgwasm.pgwasm_load` issues, and a sample `SELECT` for every primitive,
   composite, generic, and resource kind.
 
 ---
@@ -740,13 +739,13 @@ Shared-memory counters back three SQL table functions:
 
 | Function | Columns (abridged) |
 |----------|--------------------|
-| `wasm.modules()` | `module_id`, `name`, `abi`, `wasm_sha256`, `artifact_path`, `wit_world`, `policy`, `limits`, `generation`, `loaded_at`, `live_instances`, `peak_memory_pages` |
-| `wasm.functions()` | `export_id`, `module_id`, `sql_name`, `wasm_name`, `signature`, `fn_oid`, `volatility`, `invocations`, `errors`, `total_ns`, `last_error_at` |
-| `wasm.stats()` | `export_id`, process `pid`, `invocations`, `errors`, `fuel_consumed`, `memory_peak_pages`, `traps_by_kind jsonb` — per-process view useful when debugging |
-| `wasm.wit_types()` | `wit_type_id`, `module_id`, `wit_name`, `pg_type_oid`, `kind`, `definition` |
-| `wasm.policy_effective()` | `module_id`, each policy / limit column resolved against current GUCs |
+| `pgwasm.pgwasm_modules()` | `module_id`, `name`, `abi`, `wasm_sha256`, `artifact_path`, `wit_world`, `policy`, `limits`, `generation`, `loaded_at`, `live_instances`, `peak_memory_pages` |
+| `pgwasm.pgwasm_functions()` | `export_id`, `module_id`, `sql_name`, `wasm_name`, `signature`, `fn_oid`, `volatility`, `invocations`, `errors`, `total_ns`, `last_error_at` |
+| `pgwasm.pgwasm_stats()` | `export_id`, process `pid`, `invocations`, `errors`, `fuel_consumed`, `memory_peak_pages`, `traps_by_kind jsonb` — per-process view useful when debugging |
+| `pgwasm.pgwasm_wit_types()` | `wit_type_id`, `module_id`, `wit_name`, `pg_type_oid`, `kind`, `definition` |
+| `pgwasm.pgwasm_policy_effective()` | `module_id`, each policy / limit column resolved against current GUCs |
 
-All views are SRF-based and implemented in `views.rs`. `wasm.stats()` is
+All views are SRF-based and implemented in `views.rs`. `pgwasm.pgwasm_stats()` is
 the only per-process view; the rest are cluster-wide.
 
 ---
@@ -783,7 +782,7 @@ fields so clients can react programmatically.
   instance pool. Compilation output on disk is shared but immutable per
   `<module_id, wasmtime_version>` tuple.
 - **Catalog mutations** (load/unload/reload/reconfigure) take an exclusive
-  `LWLock` (`pg_wasm.CatalogLock`) around shmem generation bumps and SPI DDL.
+  `LWLock` (`pgwasm.CatalogLock`) around shmem generation bumps and SPI DDL.
   Concurrent loads are serialized; concurrent invocations are not.
 - **Reload ordering**: an in-flight invocation of the old bytes completes
   against the old `ModuleHandle`; subsequent invocations use the new one
@@ -793,7 +792,7 @@ fields so clients can react programmatically.
 
 ## 13. Security posture
 
-- **Superuser or `pg_wasm_loader`** required for all mutation APIs. The role
+- **Superuser or `pgwasm_loader`** required for all mutation APIs. The role
   is not a member of `pg_catalog` and grants only EXECUTE on the four
   mutation functions.
 - **`CREATE EXTENSION`** runs the role DDL; `DROP EXTENSION` revokes.
@@ -802,13 +801,13 @@ fields so clients can react programmatically.
 - **Deny-by-default WASI.** Even with `allow_wasi = on`, each individual
   capability (`fs`, `net`, `http`, `env`, `stdio`) is its own toggle.
 - **Path policy.** Absolute paths are canonicalized, symlinks rejected
-  unless `pg_wasm.follow_symlinks = on`, and the final path must sit under a
+  unless `pgwasm.follow_symlinks = on`, and the final path must sit under a
   configured prefix.
 - **No dynamic linking.** We do not expose `dlopen`-like capabilities to
   guests; components declare their imports statically and we either satisfy
   them from the allow-list or refuse to instantiate.
-- **Metrics disclosure.** `wasm.stats()` is readable by the
-  `wasm_reader` role (GRANTed by the extension SQL); other catalog views
+- **Metrics disclosure.** `pgwasm.pgwasm_stats()` is readable by the
+  `pgwasm_reader` role (GRANTed by the extension SQL); other catalog views
   are world-readable because they leak nothing beyond what `pg_proc` already
   exposes.
 
@@ -818,14 +817,14 @@ fields so clients can react programmatically.
 
 Matches the three-layer model in `AGENTS.md`:
 
-- **pg_regress** (`pg_wasm/tests/pg_regress/`) — deterministic golden SQL for:
+- **pg_regress** (`pgwasm/tests/pg_regress/`) — deterministic golden SQL for:
   lifecycle (`load → call → reconfigure → reload → unload`), each WIT type
   mapping (records, enums, variants, lists), policy narrowing, error classes.
-  Fixtures live under `pg_wasm/fixtures/*.wat` and `*.wit`.
-- **In-backend unit tests** (`#[pg_test]` inside `pg_wasm/src/**`) — exercise
+  Fixtures live under `pgwasm/fixtures/*.wat` and `*.wit`.
+- **In-backend unit tests** (`#[pg_test]` inside `pgwasm/src/**`) — exercise
   `policy::resolve`, `wit::typing`, `registry` cache coherence with
   generation bumps, trampoline error paths. Run with
-  `cargo pgrx test -p pg_wasm`.
+  `cargo pgrx test -p pgwasm`.
 - **Host-only unit tests** (`#[test]`) — pure Rust only. Cover `abi::detect`,
   `mapping::scalars`, GUC parsing of list values, path policy. Never call
   pgrx symbols that assume a loaded backend.
@@ -846,7 +845,7 @@ Fixtures:
 
 ## 15. Build features
 
-`pg_wasm/Cargo.toml` currently defaults to `pg17` and keeps the component
+`pgwasm/Cargo.toml` currently defaults to `pg17` and keeps the component
 model always enabled. The earlier `component-model` / `core-only` feature split
 was closed without implementation; v2 remains Wasmtime-only with both component
 and degraded core paths compiled.
@@ -857,11 +856,11 @@ No `runtime-extism`, no `runtime-wasmer`: v2 is Wasmtime-only.
 
 ## 16. Observability beyond views
 
-- `RAISE NOTICE` at each lifecycle event, gated by `pg_wasm.log_level`.
+- `RAISE NOTICE` at each lifecycle event, gated by `pgwasm.log_level`.
 - Optional integration with `log_destination = jsonlog` by embedding the
   `module_id`, `export_id`, and `wasmtime_version` in every error.
 - Counters exported to shared memory are consumable by `pg_stat_*` scraping
-  tools through the `wasm.stats()` view; no external dependency is
+  tools through the `pgwasm.pgwasm_stats()` view; no external dependency is
   required.
 
 ---
@@ -878,7 +877,7 @@ No `runtime-extism`, no `runtime-wasmer`: v2 is Wasmtime-only.
   sanity check before the `unsafe` `Component::deserialize_file` /
   `Module::deserialize_file` call. Row-level state (counters in shared
   memory) is re-initialized.
-- **Extension upgrade.** `sql/pg_wasm--X.Y--X.Z.sql` files carry DDL
+- **Extension upgrade.** `sql/pgwasm--X.Y--X.Z.sql` files carry DDL
   migrations. `catalog::migrations` asserts table shape at `_PG_init`.
 - **Wasmtime upgrade.** Same artifact-recompile flow as `pg_upgrade`.
 
@@ -886,7 +885,7 @@ No `runtime-extism`, no `runtime-wasmer`: v2 is Wasmtime-only.
 
 ## 18. Open questions (tracked, not blockers)
 
-- Should we expose a `pg_wasm.attach(path)` that points at an
+- Should we expose a `pgwasm.attach(path)` that points at an
   externally-built `.cwasm` directly, bypassing compilation? (Useful in
   read-replica / CDN scenarios.)
 - Do we want a per-backend **LRU eviction** of `ModuleHandle`s under memory
@@ -898,7 +897,7 @@ No `runtime-extism`, no `runtime-wasmer`: v2 is Wasmtime-only.
 
 ## 19. Summary
 
-v2 `pg_wasm` is a **Wasmtime + Component Model**-centric extension. Loaded
+v2 `pgwasm` is a **Wasmtime + Component Model**-centric extension. Loaded
 modules are durable catalog objects with on-disk compiled artifacts; each
 exposes WIT-typed exports as SQL functions with automatically registered
 UDTs. A shared runtime and instance pool per backend keep per-call overhead

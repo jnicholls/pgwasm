@@ -5,7 +5,7 @@ use std::process::Command;
 
 use crate::common::{
     bootstrap_extension, call_i32, connect, database_url, itest_component_wasm, itest_load_options,
-    reset_integration_database, reset_pg_wasm_gucs, unique_suffix, wasm_load_bytes, wasm_unload,
+    reset_integration_database, reset_pgwasm_gucs, unique_suffix, wasm_load_bytes, wasm_unload,
 };
 
 fn workspace_root() -> &'static Path {
@@ -25,7 +25,7 @@ async fn backend_restart_still_invokes_loaded_module() {
 
     let client = connect().await.unwrap();
     bootstrap_extension(&client).await.unwrap();
-    reset_pg_wasm_gucs(&client).await.unwrap();
+    reset_pgwasm_gucs(&client).await.unwrap();
 
     wasm_load_bytes(
         &client,

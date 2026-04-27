@@ -2,12 +2,12 @@
 
 use crate::common::{
     bootstrap_extension, connect, itest_component_wasm, itest_load_options,
-    reset_integration_database, reset_pg_wasm_gucs, unique_suffix, wasm_fn_ident, wasm_load_bytes,
+    reset_integration_database, reset_pgwasm_gucs, unique_suffix, wasm_fn_ident, wasm_load_bytes,
     wasm_unload,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires DATABASE_URL to a cluster with pg_wasm installed (see tests/README.md)"]
+#[ignore = "requires DATABASE_URL to a cluster with pgwasm installed (see tests/README.md)"]
 async fn query_cancel_maps_to_query_canceled() {
     reset_integration_database().await.unwrap();
     let suffix = unique_suffix();
@@ -15,9 +15,9 @@ async fn query_cancel_maps_to_query_canceled() {
 
     let setup = connect().await.unwrap();
     bootstrap_extension(&setup).await.unwrap();
-    reset_pg_wasm_gucs(&setup).await.unwrap();
+    reset_pgwasm_gucs(&setup).await.unwrap();
     setup
-        .execute("SET pg_wasm.invocation_deadline_ms = '600000'", &[])
+        .execute("SET pgwasm.invocation_deadline_ms = '600000'", &[])
         .await
         .unwrap();
 

@@ -1,10 +1,10 @@
 # WIT → PostgreSQL type mapping
 
-This page is the canonical reference for how `pg_wasm` maps
+This page is the canonical reference for how `pgwasm` maps
 [WIT](https://component-model.bytecodealliance.org/design/wit.html) types
 to PostgreSQL types. The mapping is deterministic: the same WIT world
 always produces the same PG type names (up to the `<module_prefix>`
-derived from the module name), which lets `pg_wasm.reload` preserve OIDs
+derived from the module name), which lets `pgwasm.pgwasm_reload` preserve OIDs
 across code changes when the signatures are unchanged.
 
 For the architectural rationale, see
@@ -31,7 +31,7 @@ UDTs are named `ex_<kind>_<name>` and exports are `ex_<fn_name>`.
 | `list<T>` | `T[]` when `T` is a simple scalar; otherwise a `jsonb` domain |
 | `option<T>` | nullable column of the PG mapping of `T` |
 | `result<T, E>` | composite `(ok T?, err E?)`, or tagged `jsonb` when `E` is a complex variant |
-| `tuple<A, B, ...>` | anonymous composite registered as `pg_wasm_tuple_<hash>` |
+| `tuple<A, B, ...>` | anonymous composite registered as `pgwasm.m<module_id>_<type_key>` (stable key derived from the WIT shape) |
 | `record { ... }` | named composite type |
 | `variant { Foo(A), Bar, ... }` | composite `(tag text, foo A, bar boolean default false)` or tagged `jsonb` if recursive |
 | `enum { ... }` | PG enum |
@@ -39,7 +39,7 @@ UDTs are named `ex_<kind>_<name>` and exports are `ex_<fn_name>`.
 | `resource` | opaque `bigint` handle; borrowed vs owned enforced at marshal time |
 
 The rest of this document expands every row with a concrete WIT fragment,
-the DDL issued by `pg_wasm.load`, and a sample `SELECT`.
+the DDL issued by `pgwasm.pgwasm_load`, and a sample `SELECT`.
 
 ## 1. Primitives
 
@@ -72,7 +72,7 @@ SELECT ex_add_s64(1::bigint, 2::bigint); -- 3
 
 ### 1.3 Unsigned integers (domain wrappers)
 
-Because PostgreSQL has no native unsigned integer types, `pg_wasm` wraps
+Because PostgreSQL has no native unsigned integer types, `pgwasm` wraps
 unsigned WIT types in domains that enforce the non-negative range. The
 domain names are derived from the module prefix:
 
@@ -108,7 +108,7 @@ SELECT ex_hypot(3::float8, 4::float8);  -- 5
 ### 1.5 `char`
 
 `char` in WIT is a Unicode scalar value. When the reachable domain is
-clearly a byte, `pg_wasm` uses PostgreSQL's `"char"` type; otherwise it
+clearly a byte, `pgwasm` uses PostgreSQL's `"char"` type; otherwise it
 widens to `text` to preserve the full code-point range.
 
 ```wit
@@ -167,7 +167,7 @@ export split: func(s: string) -> tuple<string, string>;
 ```
 
 ```sql
--- CREATE TYPE pg_wasm_tuple_<hash> AS (field0 text, field1 text);
+-- CREATE TYPE pgwasm."m<module_id>_<type_key>" AS (f0 text, f1 text);
 SELECT * FROM ex_split('a=b');
 --   field0 | field1
 --   -------+-------
@@ -190,7 +190,7 @@ export area: func(s: shape) -> f64;
 -- CREATE TYPE ex_variant_shape AS (
 --   tag        text,
 --   circle     double precision,
---   rectangle  pg_wasm_tuple_<hash>,
+--   rectangle  pgwasm."m<module_id>_<type_key>",
 --   unit       boolean DEFAULT false
 -- );
 
@@ -278,8 +278,8 @@ SELECT unnest(ex_names());
 ```
 
 For element types that are themselves composites or deep variants,
-`pg_wasm` falls back to a domain over `jsonb` (documented on the module's
-`pg_wasm.wit_types` row).
+`pgwasm` falls back to a domain over `jsonb` (documented on the module's
+`pgwasm.wit_types` row).
 
 ## 4. Resources and handles
 
@@ -315,23 +315,23 @@ underlying resource in the component.
 
 ## 5. Deterministic naming
 
-`pg_wasm` derives PG names as `<module_prefix>_<kind>_<wit_name>` where
+`pgwasm` derives PG names as `<module_prefix>_<kind>_<wit_name>` where
 `<module_prefix>` is the slugified module name (the `name` argument of
-`pg_wasm.load`, or the slugified WIT world name when `name` is absent).
+`pgwasm.pgwasm_load`, or the slugified WIT world name when `name` is absent).
 This guarantees:
 
 - Two modules can register records with the same WIT name without
   colliding in the PG catalog.
-- `pg_wasm.reload` can detect and preserve OIDs when the WIT definition
+- `pgwasm.pgwasm_reload` can detect and preserve OIDs when the WIT definition
   is byte-for-byte identical.
 - Administrators can identify the owning module from any `pg_type` row
   at a glance.
 
-See `pg_wasm.wit_types()` for the live list of registered types.
+See `pgwasm.pgwasm_wit_types()` for the live list of registered types.
 
-## 6. Escape hatch: `pg_wasm:host/json`
+## 6. Escape hatch: `pgwasm:host/json`
 
 For shapes that do not map cleanly — heavily recursive variants, open
-sums, etc. — a component may import the `pg_wasm:host/json` interface
+sums, etc. — a component may import the `pgwasm:host/json` interface
 and exchange data as `jsonb`. This is what "record as JSON" meant in v1
 and remains available as an explicit opt-in.

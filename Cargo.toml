@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
-    "pg_wasm",
+    "pgwasm",
     "tests",
     "tests/http_search_guest",
 ]
