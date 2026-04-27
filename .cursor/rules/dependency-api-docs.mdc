@@ -14,4 +14,7 @@ For **external crates** (anything in `[dependencies]`, `[dev-dependencies]`, `[b
 
 For the **standard library**, follow project guidance (for example https://doc.rust-lang.org/std/) and the Rust toolchain version used here — that is separate from per-crate docs.rs versioning.
 
-When adding a new dependency, declare it in `Cargo.toml` first, then align code, examples, and documentation links with that crate’s version.
+When adding a new dependency:
+- Declare it in the workspace `Cargo.toml` first, then reference it in a member sub-crate with `workspace = true`.
+- Ensure it is the latest stable version of that dependency. Using `cargo add` is a good way to add that dependency.
+- Align code, examples, and documentation links with that crate’s version.

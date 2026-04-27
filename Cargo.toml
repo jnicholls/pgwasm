@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "pg_wasm",
     "tests",
+    "tests/http_search_guest",
 ]
 
 [workspace.package]

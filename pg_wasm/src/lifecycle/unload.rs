@@ -245,16 +245,22 @@ fn fq_type_name(oid: pg_sys::Oid) -> Result<String> {
 }
 
 fn type_in_wasm_schema(oid: pg_sys::Oid) -> Result<bool> {
+    if oid == pg_sys::InvalidOid {
+        return Ok(false);
+    }
     let sql = format!(
-        "SELECT n.nspname::text = '{CATALOG_SCHEMA}'
-         FROM pg_catalog.pg_type AS t
-         JOIN pg_catalog.pg_namespace AS n ON n.oid = t.typnamespace
-         WHERE t.oid = {}",
-        oid.to_u32()
+        "SELECT EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_type AS t
+            JOIN pg_catalog.pg_namespace AS n ON n.oid = t.typnamespace
+            WHERE t.oid = {} AND n.nspname::text = '{}'
+        )",
+        oid.to_u32(),
+        CATALOG_SCHEMA.replace('\'', "''")
     );
     Spi::get_one::<bool>(&sql)
         .map_err(|e| PgWasmError::Internal(format!("SPI error checking type schema: {e}")))?
-        .ok_or_else(|| PgWasmError::Internal("type missing for schema check".to_string()))
+        .ok_or_else(|| PgWasmError::Internal("schema check query returned NULL".to_string()))
 }
 
 fn drop_wit_type_oid(oid: pg_sys::Oid, cascade: bool) -> Result<()> {

@@ -1,0 +1,8 @@
+package pgwasm:http-search-guest@0.1.0;
+
+/// `wasi:http/imports` pulls in `wasi:cli`; vendored `cli.wit` omits unstable
+/// `wasi:clocks/timezone` imports so `wit-bindgen` can resolve this world.
+world http-search {
+  include wasi:http/imports@0.2.6;
+  export search-titles: func() -> string;
+}

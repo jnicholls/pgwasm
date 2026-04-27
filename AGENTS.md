@@ -6,6 +6,8 @@ This file orients automated assistants and humans working in this repository.
 
 Apply these rules to **Rust sources** (`*.rs`) and **Cargo manifests** (`Cargo.toml`) in this workspace.
 
+More detail: `.cursor/rules/rust-coding-standards.mdc`.
+
 ### Edition, language, and standard library
 
 - Prefer **Rust 2024 edition** capabilities and idioms when they match existing project style.

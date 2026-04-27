@@ -1,0 +1,12 @@
+[package]
+name = "http_search_guest"
+authors.workspace = true
+edition.workspace = true
+publish = false
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "0.41", default-features = false, features = ["macros", "realloc"] }

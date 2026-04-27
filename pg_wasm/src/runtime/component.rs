@@ -126,7 +126,10 @@ pub(crate) fn build_linker(
         PgWasmError::Internal(format!("failed to add WASI to component linker: {error}"))
     })?;
     if policy.allow_wasi_http {
-        wasmtime_wasi_http::p2::add_to_linker_sync(&mut linker).map_err(|error| {
+        // `wasmtime_wasi_http::p2::add_to_linker_sync` also registers proxy WASI interfaces and
+        // duplicates `wasmtime_wasi::p2::add_to_linker_sync` (e.g. `wasi:io/error@0.2.6`). Use the
+        // HTTP-only helper after full WASI, matching wasmtime-wasi-http's own p2 tests.
+        wasmtime_wasi_http::p2::add_only_http_to_linker_sync(&mut linker).map_err(|error| {
             PgWasmError::Internal(format!(
                 "failed to add wasi-http to component linker: {error}"
             ))

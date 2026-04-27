@@ -24,6 +24,7 @@ use crate::proc_reg::{self, Parallel, ProcSpec, Volatility};
 use crate::runtime::component;
 use crate::runtime::core as runtime_core;
 use crate::runtime::engine;
+use crate::runtime::pool;
 use crate::shmem;
 use crate::wit::typing;
 use crate::wit::udt;
@@ -209,6 +210,11 @@ fn load_component_path(
     let module_id_u64 = u64::try_from(module_id)
         .map_err(|_| PgWasmError::Internal("module_id does not fit u64".to_string()))?;
 
+    // `module_id` can be reused after catalog teardown (e.g. integration tests that recreate the
+    // database). Drop any per-backend `InstancePool` entry so we never instantiate a stale
+    // `Component` / linker for this id.
+    pool::drain(module_id_u64)?;
+
     let cwasm_path = artifacts::module_cwasm_path(module_id_u64)?;
     let precompile_hash = component::precompile_to(wasm_engine, bytes, &cwasm_path)?;
     artifacts::write_module_wasm(module_id_u64, bytes)?;
@@ -316,6 +322,9 @@ fn load_core_path(
     let module_id = inserted.module_id;
     let module_id_u64 = u64::try_from(module_id)
         .map_err(|_| PgWasmError::Internal("module_id does not fit u64".to_string()))?;
+
+    // Same rationale as component load: avoid a stale `InstancePool` after `module_id` reuse.
+    pool::drain(module_id_u64)?;
 
     artifacts::write_module_wasm(module_id_u64, bytes)?;
     let wasm_dir = artifacts::module_dir(module_id_u64)?;

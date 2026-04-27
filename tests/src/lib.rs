@@ -19,4 +19,6 @@ mod memory_pages;
 #[cfg(test)]
 mod query_cancellation;
 #[cfg(test)]
+mod wasi_http_search;
+#[cfg(test)]
 mod wasi_policy_denial;

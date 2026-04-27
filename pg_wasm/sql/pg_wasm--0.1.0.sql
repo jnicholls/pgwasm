@@ -35,8 +35,7 @@ CREATE TABLE IF NOT EXISTS @extschema@.wit_types (
     pg_type_oid OID NOT NULL,
     kind TEXT NOT NULL,
     definition JSONB NOT NULL DEFAULT '{}'::jsonb,
-    UNIQUE (module_id, wit_name),
-    UNIQUE (module_id, pg_type_oid)
+    UNIQUE (module_id, wit_name)
 );
 
 CREATE TABLE IF NOT EXISTS @extschema@.dependencies (

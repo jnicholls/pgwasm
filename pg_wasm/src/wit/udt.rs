@@ -226,10 +226,17 @@ fn transition_or_create(
         }
         (_, None) => {
             ensure_domains_recursive(module_id, &entry.pg_type)?;
-            let sql = build_create_sql(module_id, entry)?;
-            run_sql(&sql)?;
             let fq = sql_qualified_type_name(module_id, &entry.wit_name, &entry.pg_type)?;
-            let oid = lookup_regtype_oid(&fq)?;
+            let oid = if regtype_exists(&fq)? {
+                // `ensure_domains_recursive` already ran `CREATE DOMAIN` for root `PgType::Domain`
+                // (and nested domains). Do not run `build_create_sql` again or PostgreSQL errors with
+                // "type ... already exists".
+                lookup_regtype_oid(&fq)?
+            } else {
+                let sql = build_create_sql(module_id, entry)?;
+                run_sql(&sql)?;
+                lookup_regtype_oid(&fq)?
+            };
             insert_catalog_row(
                 module_id,
                 &entry.type_key,
@@ -440,16 +447,23 @@ fn insert_catalog_row(
 }
 
 fn type_is_in_schema(type_oid: pg_sys::Oid, schema: &str) -> Result<bool> {
+    if type_oid == pg_sys::InvalidOid {
+        return Ok(false);
+    }
+    let schema_esc = schema.replace('\'', "''");
     let sql = format!(
-        "SELECT n.nspname::text = '{schema}'
-         FROM pg_catalog.pg_type AS t
-         JOIN pg_catalog.pg_namespace AS n ON n.oid = t.typnamespace
-         WHERE t.oid = {}",
-        type_oid.to_u32()
+        "SELECT EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_type AS t
+            JOIN pg_catalog.pg_namespace AS n ON n.oid = t.typnamespace
+            WHERE t.oid = {} AND n.nspname::text = '{}'
+        )",
+        type_oid.to_u32(),
+        schema_esc
     );
     Spi::get_one::<bool>(&sql)
         .map_err(|e| PgWasmError::Internal(format!("SPI error checking type schema: {e}")))?
-        .ok_or_else(|| PgWasmError::Internal("type missing for schema check".to_string()))
+        .ok_or_else(|| PgWasmError::Internal("schema check query returned NULL".to_string()))
 }
 
 fn lookup_builtin_type_oid(pg_name: &str) -> Result<pg_sys::Oid> {
@@ -594,19 +608,10 @@ fn build_create_sql(module_id: i64, entry: &TypePlanEntry) -> Result<String> {
                 .join(", ");
             format!("CREATE TYPE {fq} AS ENUM ({labels})")
         }
-        PgType::Variant(cases) => {
-            let mut parts = vec!["discriminant text".to_string(), "payload jsonb".to_string()];
-            for c in cases {
-                let tag = format!("tag_{}", sanitize_sql_ident(&c.name));
-                let payload_ty = c
-                    .payload
-                    .as_ref()
-                    .map(|p| pg_type_sql(module_id, p))
-                    .transpose()?
-                    .unwrap_or_else(|| "pg_catalog.void".to_string());
-                parts.push(format!("{} {}", quote_ident(&tag), payload_ty));
-            }
-            format!("CREATE TYPE {fq} AS ({})", parts.join(", "))
+        PgType::Variant(_cases) => {
+            // Only `discriminant` + `payload jsonb`: PostgreSQL rejects `void` in composite columns,
+            // and `mapping::composite::val_to_datum` for variants supplies exactly two attributes.
+            format!("CREATE TYPE {fq} AS (discriminant text, payload jsonb)")
         }
         PgType::Array(inner) => {
             let elem = pg_type_sql(module_id, inner)?;

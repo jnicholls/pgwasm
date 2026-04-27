@@ -90,7 +90,10 @@ pub(crate) async fn reset_pg_wasm_gucs(client: &Client) -> Result<()> {
             r"
             RESET pg_wasm.allow_wasi;
             RESET pg_wasm.allow_wasi_fs;
+            RESET pg_wasm.allow_wasi_http;
+            RESET pg_wasm.allow_wasi_net;
             RESET pg_wasm.allow_wasi_stdio;
+            RESET pg_wasm.allowed_hosts;
             RESET pg_wasm.wasi_preopens;
             RESET pg_wasm.fuel_enabled;
             RESET pg_wasm.invocation_deadline_ms;
@@ -166,8 +169,24 @@ pub(crate) async fn call_i32(
     Ok(v)
 }
 
+pub(crate) async fn call_text(
+    client: &Client,
+    module_name: &str,
+    export_sql_name: &str,
+) -> Result<String> {
+    let ident = wasm_fn_ident(module_name, export_sql_name);
+    let sql = format!(r#"SELECT wasm."{}"()"#, ident.replace('"', "\"\""));
+    let row = client.query_one(&sql, &[]).await?;
+    let v: String = row.get(0);
+    Ok(v)
+}
+
 pub(crate) fn itest_component_wasm() -> &'static [u8] {
     include_bytes!(concat!(env!("OUT_DIR"), "/itest.component.wasm"))
+}
+
+pub(crate) fn http_search_component_wasm() -> &'static [u8] {
+    include_bytes!(concat!(env!("OUT_DIR"), "/http_search.component.wasm"))
 }
 
 /// Default `limits` object stored in the catalog for integration fixtures.
