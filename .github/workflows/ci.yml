@@ -71,6 +71,11 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends postgresql-server-dev-17
+          # pgrx installs the extension into PG's share/lib dirs (root-owned on runners).
+          sudo mkdir -p /usr/share/postgresql/17/extension /usr/lib/postgresql/17/lib
+          sudo chown -R "$(id -un):$(id -gn)" \
+            /usr/share/postgresql/17/extension \
+            /usr/lib/postgresql/17/lib
 
       - name: Install cargo-pgrx
         run: cargo install cargo-pgrx --locked --version 0.18.0
