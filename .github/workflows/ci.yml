@@ -55,6 +55,8 @@ jobs:
 
       - uses: ./.github/actions/setup-pgrx-pg17
 
+      - uses: ./.github/actions/install-wasm-tools
+
       - name: cargo pgrx test
         working-directory: pg_wasm
         run: cargo pgrx test pg17 -p pg_wasm
