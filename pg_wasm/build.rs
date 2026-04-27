@@ -1,4 +1,4 @@
-//! Builds tiny Wasm guests under `test_guests/` for `#[pg_test]` host-interface checks.
+//! Builds tiny Wasm guests under `tests/guests/` for `#[pg_test]` host-interface checks.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -18,32 +18,38 @@ fn main() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
     println!("cargo:rerun-if-changed=wit/host.wit");
-    println!("cargo:rerun-if-changed=test_guests/log_guest/src/lib.rs");
-    println!("cargo:rerun-if-changed=test_guests/log_guest/wit/guest.wit");
-    println!("cargo:rerun-if-changed=test_guests/log_guest/wit/deps/pg-wasm-host/host.wit");
-    println!("cargo:rerun-if-changed=test_guests/log_guest/Cargo.toml");
-    println!("cargo:rerun-if-changed=test_guests/query_guest/src/lib.rs");
-    println!("cargo:rerun-if-changed=test_guests/query_guest/wit/guest.wit");
-    println!("cargo:rerun-if-changed=test_guests/query_guest/wit/deps/pg-wasm-host/host.wit");
-    println!("cargo:rerun-if-changed=test_guests/query_guest/Cargo.toml");
-    println!("cargo:rerun-if-changed=test_guests/write_query_guest/src/lib.rs");
-    println!("cargo:rerun-if-changed=test_guests/write_query_guest/wit/guest.wit");
-    println!("cargo:rerun-if-changed=test_guests/write_query_guest/wit/deps/pg-wasm-host/host.wit");
-    println!("cargo:rerun-if-changed=test_guests/write_query_guest/Cargo.toml");
+    println!("cargo:rerun-if-changed=tests/guests/log_guest/src/lib.rs");
+    println!("cargo:rerun-if-changed=tests/guests/log_guest/wit/guest.wit");
+    println!("cargo:rerun-if-changed=tests/guests/log_guest/wit/deps/pg-wasm-host/host.wit");
+    println!("cargo:rerun-if-changed=tests/guests/log_guest/Cargo.toml");
+    println!("cargo:rerun-if-changed=tests/guests/query_guest/src/lib.rs");
+    println!("cargo:rerun-if-changed=tests/guests/query_guest/wit/guest.wit");
+    println!("cargo:rerun-if-changed=tests/guests/query_guest/wit/deps/pg-wasm-host/host.wit");
+    println!("cargo:rerun-if-changed=tests/guests/query_guest/Cargo.toml");
+    println!("cargo:rerun-if-changed=tests/guests/write_query_guest/src/lib.rs");
+    println!("cargo:rerun-if-changed=tests/guests/write_query_guest/wit/guest.wit");
+    println!(
+        "cargo:rerun-if-changed=tests/guests/write_query_guest/wit/deps/pg-wasm-host/host.wit"
+    );
+    println!("cargo:rerun-if-changed=tests/guests/write_query_guest/Cargo.toml");
 
     let guest_target_dir = manifest_dir.join("target/guest_build");
     let _ = std::fs::create_dir_all(&guest_target_dir);
 
     for (name, rel_manifest, crate_name) in [
-        ("log_guest", "test_guests/log_guest/Cargo.toml", "log_guest"),
+        (
+            "log_guest",
+            "tests/guests/log_guest/Cargo.toml",
+            "log_guest",
+        ),
         (
             "query_guest",
-            "test_guests/query_guest/Cargo.toml",
+            "tests/guests/query_guest/Cargo.toml",
             "query_guest",
         ),
         (
             "write_query_guest",
-            "test_guests/write_query_guest/Cargo.toml",
+            "tests/guests/write_query_guest/Cargo.toml",
             "write_query_guest",
         ),
     ] {

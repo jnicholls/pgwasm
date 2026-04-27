@@ -487,14 +487,14 @@ mod host_tests {
     }
 
     fn fixture_on_load_err_component(engine: &Engine) -> Result<Arc<Component>> {
-        let bytes = include_bytes!("../testdata/on_load_err.wasm");
+        let bytes = include_bytes!("../tests/data/on_load_err.wasm");
         Ok(Arc::new(Component::from_binary(engine, bytes).map_err(
             |e| PgWasmError::Internal(format!("compile on_load_err fixture: {e}")),
         )?))
     }
 
     fn fixture_on_unload_trap_component(engine: &Engine) -> Result<Arc<Component>> {
-        let bytes = include_bytes!("../testdata/on_unload_trap.wasm");
+        let bytes = include_bytes!("../tests/data/on_unload_trap.wasm");
         Ok(Arc::new(Component::from_binary(engine, bytes).map_err(
             |e| PgWasmError::Internal(format!("compile on_unload_trap fixture: {e}")),
         )?))

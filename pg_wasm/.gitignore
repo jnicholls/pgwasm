@@ -4,9 +4,9 @@
 *.iml
 **/*.rs.bk
 Cargo.lock
-!/test_guests/log_guest/Cargo.lock
-!/test_guests/query_guest/Cargo.lock
-!/test_guests/write_query_guest/Cargo.lock
+!/tests/guests/log_guest/Cargo.lock
+!/tests/guests/query_guest/Cargo.lock
+!/tests/guests/write_query_guest/Cargo.lock
 tests/pg_regress/results
 tests/pg_regress/regression.diffs
 tests/pg_regress/regression.out

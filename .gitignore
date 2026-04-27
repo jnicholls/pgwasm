@@ -4,7 +4,7 @@
 pg_wasm.code-workspace
 /target
 pg_wasm/target/
-pg_wasm/test_guests/**/target/
+pg_wasm/tests/guests/**/target/
 *.iml
 **/*.rs.bk
 Cargo.lock
