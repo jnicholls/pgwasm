@@ -29,10 +29,10 @@ wasmparser.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 wasmtime-wasi-http.workspace = true
-wat = "1"
+wat.workspace = true
 wit-component.workspace = true
 wit-parser.workspace = true
 
 [dev-dependencies]
 pgrx-tests.workspace = true
-tempfile = "3"
+tempfile.workspace = true
