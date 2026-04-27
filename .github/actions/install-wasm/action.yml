@@ -1,6 +1,6 @@
-name: Install wasm-tools
+name: Install wasm-tools and wasm32-wasip2 target
 description: >-
-  Install the wasm-tools CLI on PATH (tests/build.rs and fixture scripts expect it).
+  Install the wasm-tools CLI on PATH (tests/build.rs and fixture scripts expect it) and the wasm32-wasip2 target.
   Version tracks the workspace wit-component / wasmtime component stack (0.247).
 
 runs:
@@ -9,6 +9,6 @@ runs:
     - name: cargo install wasm-tools
       shell: bash
       run: cargo install wasm-tools --locked --version 1.247.0
-    - name: install wasm32-wasip2 target
+    - name: rustup target add wasm32-wasip2
       shell: bash
       run: rustup target add wasm32-wasip2

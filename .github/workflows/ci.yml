@@ -15,8 +15,8 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  rust:
-    name: Rust (fmt, check, clippy, test)
+  ci:
+    name: pg_wasm CI (fmt, check, clippy, test, pgrx test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
 
       - uses: ./.github/actions/setup-pgrx-pg17
 
-      - uses: ./.github/actions/install-wasm-tools
+      - uses: ./.github/actions/install-wasm
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
@@ -43,24 +43,8 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
 
-  pgrx:
-    name: pgrx (pg17 tests + regress)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: ./.github/actions/setup-pgrx-pg17
-
-      - uses: ./.github/actions/install-wasm-tools
-
       - name: cargo pgrx test
-        working-directory: pg_wasm
         run: cargo pgrx test pg17 -p pg_wasm
 
       - name: cargo pgrx regress
-        working-directory: pg_wasm
         run: cargo pgrx regress pg17 --resetdb -p pg_wasm
