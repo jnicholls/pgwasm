@@ -88,13 +88,13 @@ def main() -> None:
             ]
             LOOP
                 BEGIN
-                    IF EXISTS (SELECT 1 FROM wasm.modules WHERE name = n) THEN
-                        PERFORM wasm.unload(n, true);
+                    IF EXISTS (SELECT 1 FROM pgwasm.modules WHERE name = n) THEN
+                        PERFORM pgwasm.pgwasm_unload(n, true);
                     END IF;
                 EXCEPTION
                     WHEN OTHERS THEN
                         BEGIN
-                            PERFORM wasm.test_force_cleanup_stuck_module(n, true);
+                            PERFORM pgwasm.pgwasm_test_force_cleanup_stuck_module(n, true);
                         EXCEPTION
                             WHEN OTHERS THEN
                                 NULL;
@@ -104,7 +104,7 @@ def main() -> None:
         END;
         $lc$;
 
-        SELECT wasm.load(
+        SELECT pgwasm.pgwasm_load(
             'lc_arith',
             json_build_object(
                 'bytes',
@@ -114,13 +114,13 @@ def main() -> None:
         ) AS loaded_arith;
 
         SELECT name, abi, origin
-        FROM wasm.modules
+        FROM pgwasm.modules
         WHERE name = 'lc_arith'
         ORDER BY name;
 
-        SELECT wasm.unload('lc_arith', false) AS unloaded_arith;
+        SELECT pgwasm.pgwasm_unload('lc_arith', false) AS unloaded_arith;
 
-        SELECT wasm.load(
+        SELECT pgwasm.pgwasm_load(
             'lc_reload_src',
             json_build_object(
                 'bytes',
@@ -131,11 +131,11 @@ def main() -> None:
 
         CREATE TEMP TABLE lc_reload_baseline AS
         SELECT e.export_id, e.fn_oid, m.generation AS gen
-        FROM wasm.exports e
-        JOIN wasm.modules m ON m.module_id = e.module_id
+        FROM pgwasm.exports e
+        JOIN pgwasm.modules m ON m.module_id = e.module_id
         WHERE m.name = 'lc_reload_src';
 
-        SELECT wasm.reload(
+        SELECT pgwasm.pgwasm_reload(
             'lc_reload_src',
             json_build_object(
                 'bytes',
@@ -151,15 +151,15 @@ def main() -> None:
         FROM lc_reload_baseline b,
         LATERAL (
             SELECT e.export_id, e.fn_oid, m.generation AS gen
-            FROM wasm.exports e
-            JOIN wasm.modules m ON m.module_id = e.module_id
+            FROM pgwasm.exports e
+            JOIN pgwasm.modules m ON m.module_id = e.module_id
             WHERE m.name = 'lc_reload_src'
         ) cur;
 
-        SELECT wasm.unload('lc_reload_src', false) AS unloaded_reload_src;
+        SELECT pgwasm.pgwasm_unload('lc_reload_src', false) AS unloaded_reload_src;
 
         BEGIN;
-        SELECT wasm.load(
+        SELECT pgwasm.pgwasm_load(
             'lc_rb',
             json_build_object(
                 'bytes',
@@ -170,10 +170,10 @@ def main() -> None:
         ROLLBACK;
 
         SELECT COUNT(*) AS n_after_rb
-        FROM wasm.modules
+        FROM pgwasm.modules
         WHERE name = 'lc_rb';
 
-        SELECT wasm.load(
+        SELECT pgwasm.pgwasm_load(
             'lc_policy',
             json_build_object(
                 'bytes',
@@ -190,20 +190,20 @@ def main() -> None:
             )
         ) AS loaded_policy;
 
-        SELECT wasm.reconfigure(
+        SELECT pgwasm.pgwasm_reconfigure(
             'lc_policy',
             NULL,
             json_build_object('fuel_per_invocation', 5000)
         ) AS reconfigured_narrow;
 
         SELECT limits_json ->> 'fuel_per_invocation' AS fuel_after_narrow
-        FROM wasm.modules
+        FROM pgwasm.modules
         WHERE name = 'lc_policy'
         ORDER BY name;
 
         DO $$
         BEGIN
-            PERFORM wasm.reconfigure(
+            PERFORM pgwasm.pgwasm_reconfigure(
                 'lc_policy',
                 NULL,
                 json_build_object('fuel_per_invocation', 99999999)
@@ -215,9 +215,9 @@ def main() -> None:
         END
         $$;
 
-        SELECT wasm.unload('lc_policy', false) AS unloaded_policy;
+        SELECT pgwasm.pgwasm_unload('lc_policy', false) AS unloaded_policy;
 
-        SELECT wasm.load(
+        SELECT pgwasm.pgwasm_load(
             'lc_hooks',
             json_build_object(
                 'bytes',
@@ -226,11 +226,11 @@ def main() -> None:
             {opt_limits_default}
         ) AS loaded_hooks;
 
-        SELECT wasm.reconfigure('lc_hooks', NULL, NULL) AS reconfigured_hooks_ok;
+        SELECT pgwasm.pgwasm_reconfigure('lc_hooks', NULL, NULL) AS reconfigured_hooks_ok;
 
-        SELECT wasm.unload('lc_hooks', false) AS unloaded_hooks;
+        SELECT pgwasm.pgwasm_unload('lc_hooks', false) AS unloaded_hooks;
 
-        SELECT wasm.load(
+        SELECT pgwasm.pgwasm_load(
             'lc_resources',
             json_build_object(
                 'bytes',
@@ -240,11 +240,11 @@ def main() -> None:
         ) AS loaded_resources;
 
         SELECT export_name, fn_oid
-        FROM wasm.functions()
+        FROM pgwasm.pgwasm_functions()
         WHERE module_name = 'lc_resources'
         ORDER BY export_name;
 
-        SELECT wasm.unload('lc_resources', false) AS unloaded_resources;
+        SELECT pgwasm.pgwasm_unload('lc_resources', false) AS unloaded_resources;
         """
     )
 
@@ -263,13 +263,13 @@ def main() -> None:
             FOREACH n IN ARRAY ARRAY['wm_wit']
             LOOP
                 BEGIN
-                    IF EXISTS (SELECT 1 FROM wasm.modules WHERE name = n) THEN
-                        PERFORM wasm.unload(n, true);
+                    IF EXISTS (SELECT 1 FROM pgwasm.modules WHERE name = n) THEN
+                        PERFORM pgwasm.pgwasm_unload(n, true);
                     END IF;
                 EXCEPTION
                     WHEN OTHERS THEN
                         BEGIN
-                            PERFORM wasm.test_force_cleanup_stuck_module(n, true);
+                            PERFORM pgwasm.pgwasm_test_force_cleanup_stuck_module(n, true);
                         EXCEPTION
                             WHEN OTHERS THEN
                                 NULL;
@@ -279,7 +279,7 @@ def main() -> None:
         END;
         $wm$;
 
-        SELECT wasm.load(
+        SELECT pgwasm.pgwasm_load(
             'wm_wit',
             json_build_object(
                 'bytes',
@@ -289,26 +289,26 @@ def main() -> None:
         ) AS loaded_wit;
 
         EXPLAIN (COSTS OFF, TIMING OFF)
-        SELECT wasm.wm_wit__echo_bool(true) AS v_bool;
+        SELECT pgwasm.wm_wit__echo_bool(true) AS v_bool;
 
-        SELECT wasm.wm_wit__echo_bool(false) AS v_bool_f
+        SELECT pgwasm.wm_wit__echo_bool(false) AS v_bool_f
         ORDER BY 1;
 
-        SELECT wasm.wm_wit__echo_s32(7) AS v_s32
+        SELECT pgwasm.wm_wit__echo_s32(7) AS v_s32
         ORDER BY 1;
 
-        SELECT wasm.wm_wit__echo_s64(9000000000::int8) AS v_s64
+        SELECT pgwasm.wm_wit__echo_s64(9000000000::int8) AS v_s64
         ORDER BY 1;
 
-        SELECT wasm.wm_wit__echo_string('hi'::text) AS v_string
+        SELECT pgwasm.wm_wit__echo_string('hi'::text) AS v_string
         ORDER BY 1;
 
         SELECT export_name, fn_oid
-        FROM wasm.functions()
+        FROM pgwasm.pgwasm_functions()
         WHERE module_name = 'wm_wit'
         ORDER BY export_name;
 
-        SELECT wasm.unload('wm_wit', false) AS unloaded_wit;
+        SELECT pgwasm.pgwasm_unload('wm_wit', false) AS unloaded_wit;
         """
     )
 
@@ -322,13 +322,13 @@ def main() -> None:
         DECLARE
             n text := 'pn_mod';
         BEGIN
-            IF EXISTS (SELECT 1 FROM wasm.modules WHERE name = n) THEN
-                PERFORM wasm.unload(n, true);
+            IF EXISTS (SELECT 1 FROM pgwasm.modules WHERE name = n) THEN
+                PERFORM pgwasm.pgwasm_unload(n, true);
             END IF;
         END;
         $pn$;
 
-        SELECT wasm.load(
+        SELECT pgwasm.pgwasm_load(
             'pn_mod',
             json_build_object(
                 'bytes',
@@ -347,7 +347,7 @@ def main() -> None:
 
         DO $$
         BEGIN
-            PERFORM wasm.load(
+            PERFORM pgwasm.pgwasm_load(
                 'pn_mod_wide',
                 json_build_object(
                     'bytes',
@@ -370,7 +370,7 @@ def main() -> None:
         END
         $$;
 
-        SELECT wasm.unload('pn_mod', false) AS unloaded_pn;
+        SELECT pgwasm.pgwasm_unload('pn_mod', false) AS unloaded_pn;
         """
     )
 
@@ -383,7 +383,7 @@ def main() -> None:
         SET pgwasm.enabled = off;
         DO $$
         BEGIN
-            PERFORM wasm.load(
+            PERFORM pgwasm.pgwasm_load(
                 'ec_disabled',
                 json_build_object(
                     'bytes',
@@ -401,7 +401,7 @@ def main() -> None:
 
         DO $$
         BEGIN
-            PERFORM wasm.load(
+            PERFORM pgwasm.pgwasm_load(
                 '',
                 json_build_object(
                     'bytes',
@@ -418,7 +418,7 @@ def main() -> None:
 
         DO $$
         BEGIN
-            PERFORM wasm.load(
+            PERFORM pgwasm.pgwasm_load(
                 'ec_perm',
                 json_build_object('path', '/no/such/pgwasm_ec_path.wasm'),
                 {opt_limits_default}
@@ -432,7 +432,7 @@ def main() -> None:
 
         DO $$
         BEGIN
-            PERFORM wasm.unload('ec_no_such_module___', false);
+            PERFORM pgwasm.pgwasm_unload('ec_no_such_module___', false);
             RAISE EXCEPTION 'expected not found';
         EXCEPTION
             WHEN undefined_object THEN
@@ -443,7 +443,7 @@ def main() -> None:
         SET pgwasm.max_module_bytes = 1;
         DO $$
         BEGIN
-            PERFORM wasm.load(
+            PERFORM pgwasm.pgwasm_load(
                 'ec_limit',
                 json_build_object(
                     'bytes',
@@ -461,7 +461,7 @@ def main() -> None:
 
         DO $$
         BEGIN
-            PERFORM wasm.load(
+            PERFORM pgwasm.pgwasm_load(
                 'ec_core',
                 json_build_object('bytes', '0061736d01000000'),
                 json_build_object('abi', 'core')
@@ -475,7 +475,7 @@ def main() -> None:
 
         DO $$
         BEGIN
-            PERFORM wasm.load(
+            PERFORM pgwasm.pgwasm_load(
                 'ec_invalid',
                 json_build_object('bytes', 'ff00aa'),
                 NULL
@@ -489,7 +489,7 @@ def main() -> None:
 
         DO $$
         BEGIN
-            PERFORM wasm.load(
+            PERFORM pgwasm.pgwasm_load(
                 'ec_policy',
                 json_build_object(
                     'bytes',
@@ -516,13 +516,13 @@ def main() -> None:
         DECLARE
             n text := 'ec_trap_mod';
         BEGIN
-            IF EXISTS (SELECT 1 FROM wasm.modules WHERE name = n) THEN
-                PERFORM wasm.unload(n, true);
+            IF EXISTS (SELECT 1 FROM pgwasm.modules WHERE name = n) THEN
+                PERFORM pgwasm.pgwasm_unload(n, true);
             END IF;
         END;
         $trap$;
 
-        SELECT wasm.load(
+        SELECT pgwasm.pgwasm_load(
             'ec_trap_mod',
             json_build_object(
                 'bytes',
@@ -533,7 +533,7 @@ def main() -> None:
 
         DO $$
         BEGIN
-            PERFORM wasm.ec_trap_mod__boom();
+            PERFORM pgwasm.ec_trap_mod__boom();
             RAISE EXCEPTION 'expected trap';
         EXCEPTION
             WHEN external_routine_exception THEN
@@ -541,13 +541,13 @@ def main() -> None:
         END
         $$;
 
-        SELECT wasm.unload('ec_trap_mod', false) AS unloaded_trap_mod;
+        SELECT pgwasm.pgwasm_unload('ec_trap_mod', false) AS unloaded_trap_mod;
         """
     )
 
     metrics_sql = textwrap.dedent(
         f"""\
-        -- Monotone counters in wasm.stats() after wasm.test_bump_export_counters.
+        -- Monotone counters in pgwasm.pgwasm_stats() after pgwasm.pgwasm_test_bump_export_counters.
         SELECT set_config('pgwasm.fuel_enabled', 'off', false);
         SELECT set_config('pgwasm.invocation_deadline_ms', '0', false);
 
@@ -555,13 +555,13 @@ def main() -> None:
         DECLARE
             n text := 'metrics_mod';
         BEGIN
-            IF EXISTS (SELECT 1 FROM wasm.modules WHERE name = n) THEN
-                PERFORM wasm.unload(n, true);
+            IF EXISTS (SELECT 1 FROM pgwasm.modules WHERE name = n) THEN
+                PERFORM pgwasm.pgwasm_unload(n, true);
             END IF;
         END;
         $met$;
 
-        SELECT wasm.load(
+        SELECT pgwasm.pgwasm_load(
             'metrics_mod',
             json_build_object(
                 'bytes',
@@ -570,27 +570,27 @@ def main() -> None:
             {opt_limits_default}
         ) AS loaded_metrics;
 
-        SELECT wasm.test_bump_export_counters(m.module_id, 0, 2) AS bumped
-        FROM wasm.modules m
+        SELECT pgwasm.pgwasm_test_bump_export_counters(m.module_id, 0, 2) AS bumped
+        FROM pgwasm.modules m
         WHERE m.name = 'metrics_mod';
 
-        SELECT wasm.test_bump_export_counters(m.module_id, 0, 3) AS bumped_again
-        FROM wasm.modules m
+        SELECT pgwasm.pgwasm_test_bump_export_counters(m.module_id, 0, 3) AS bumped_again
+        FROM pgwasm.modules m
         WHERE m.name = 'metrics_mod';
 
         SELECT export_name, invocations, traps, fuel_used_total
-        FROM wasm.stats()
+        FROM pgwasm.pgwasm_stats()
         WHERE module_name = 'metrics_mod'
         ORDER BY export_name;
 
         SELECT invocations >= 5 AS invocations_monotone
-        FROM wasm.stats()
+        FROM pgwasm.pgwasm_stats()
         WHERE module_name = 'metrics_mod' AND export_name = 'add';
 
         EXPLAIN (COSTS OFF, TIMING OFF)
-        SELECT invocations FROM wasm.stats() WHERE module_name = 'metrics_mod';
+        SELECT invocations FROM pgwasm.pgwasm_stats() WHERE module_name = 'metrics_mod';
 
-        SELECT wasm.unload('metrics_mod', false) AS unloaded_metrics;
+        SELECT pgwasm.pgwasm_unload('metrics_mod', false) AS unloaded_metrics;
         """
     )
 

@@ -11,13 +11,13 @@ BEGIN
     FOREACH n IN ARRAY ARRAY['wm_wit']
     LOOP
         BEGIN
-            IF EXISTS (SELECT 1 FROM wasm.modules WHERE name = n) THEN
-                PERFORM wasm.unload(n, true);
+            IF EXISTS (SELECT 1 FROM pgwasm.modules WHERE name = n) THEN
+                PERFORM pgwasm.pgwasm_unload(n, true);
             END IF;
         EXCEPTION
             WHEN OTHERS THEN
                 BEGIN
-                    PERFORM wasm.test_force_cleanup_stuck_module(n, true);
+                    PERFORM pgwasm.pgwasm_test_force_cleanup_stuck_module(n, true);
                 EXCEPTION
                     WHEN OTHERS THEN
                         NULL;
@@ -27,7 +27,7 @@ BEGIN
 END;
 $wm$;
 
-SELECT wasm.load(
+SELECT pgwasm.pgwasm_load(
     'wm_wit',
     json_build_object(
         'bytes',
@@ -641,23 +641,23 @@ SELECT wasm.load(
 ) AS loaded_wit;
 
 EXPLAIN (COSTS OFF, TIMING OFF)
-SELECT wasm.wm_wit__echo_bool(true) AS v_bool;
+SELECT pgwasm.wm_wit__echo_bool(true) AS v_bool;
 
-SELECT wasm.wm_wit__echo_bool(false) AS v_bool_f
+SELECT pgwasm.wm_wit__echo_bool(false) AS v_bool_f
 ORDER BY 1;
 
-SELECT wasm.wm_wit__echo_s32(7) AS v_s32
+SELECT pgwasm.wm_wit__echo_s32(7) AS v_s32
 ORDER BY 1;
 
-SELECT wasm.wm_wit__echo_s64(9000000000::int8) AS v_s64
+SELECT pgwasm.wm_wit__echo_s64(9000000000::int8) AS v_s64
 ORDER BY 1;
 
-SELECT wasm.wm_wit__echo_string('hi'::text) AS v_string
+SELECT pgwasm.wm_wit__echo_string('hi'::text) AS v_string
 ORDER BY 1;
 
 SELECT export_name, fn_oid
-FROM wasm.functions()
+FROM pgwasm.pgwasm_functions()
 WHERE module_name = 'wm_wit'
 ORDER BY export_name;
 
-SELECT wasm.unload('wm_wit', false) AS unloaded_wit;
+SELECT pgwasm.pgwasm_unload('wm_wit', false) AS unloaded_wit;

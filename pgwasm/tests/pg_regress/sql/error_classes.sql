@@ -5,7 +5,7 @@ SELECT set_config('pgwasm.invocation_deadline_ms', '0', false);
 SET pgwasm.enabled = off;
 DO $$
 BEGIN
-    PERFORM wasm.load(
+    PERFORM pgwasm.pgwasm_load(
         'ec_disabled',
         json_build_object(
             'bytes',
@@ -598,7 +598,7 @@ RESET pgwasm.enabled;
 
 DO $$
 BEGIN
-    PERFORM wasm.load(
+    PERFORM pgwasm.pgwasm_load(
         '',
         json_build_object(
             'bytes',
@@ -1190,7 +1190,7 @@ $$;
 
 DO $$
 BEGIN
-    PERFORM wasm.load(
+    PERFORM pgwasm.pgwasm_load(
         'ec_perm',
         json_build_object('path', '/no/such/pgwasm_ec_path.wasm'),
         json_build_object(
@@ -1211,7 +1211,7 @@ $$;
 
 DO $$
 BEGIN
-    PERFORM wasm.unload('ec_no_such_module___', false);
+    PERFORM pgwasm.pgwasm_unload('ec_no_such_module___', false);
     RAISE EXCEPTION 'expected not found';
 EXCEPTION
     WHEN undefined_object THEN
@@ -1222,7 +1222,7 @@ $$;
 SET pgwasm.max_module_bytes = 1;
 DO $$
 BEGIN
-    PERFORM wasm.load(
+    PERFORM pgwasm.pgwasm_load(
         'ec_limit',
         json_build_object(
             'bytes',
@@ -1815,7 +1815,7 @@ RESET pgwasm.max_module_bytes;
 
 DO $$
 BEGIN
-    PERFORM wasm.load(
+    PERFORM pgwasm.pgwasm_load(
         'ec_core',
         json_build_object('bytes', '0061736d01000000'),
         json_build_object('abi', 'core')
@@ -1829,7 +1829,7 @@ $$;
 
 DO $$
 BEGIN
-    PERFORM wasm.load(
+    PERFORM pgwasm.pgwasm_load(
         'ec_invalid',
         json_build_object('bytes', 'ff00aa'),
         NULL
@@ -1843,7 +1843,7 @@ $$;
 
 DO $$
 BEGIN
-    PERFORM wasm.load(
+    PERFORM pgwasm.pgwasm_load(
         'ec_policy',
         json_build_object(
             'bytes',
@@ -2438,13 +2438,13 @@ DO $trap$
 DECLARE
     n text := 'ec_trap_mod';
 BEGIN
-    IF EXISTS (SELECT 1 FROM wasm.modules WHERE name = n) THEN
-        PERFORM wasm.unload(n, true);
+    IF EXISTS (SELECT 1 FROM pgwasm.modules WHERE name = n) THEN
+        PERFORM pgwasm.pgwasm_unload(n, true);
     END IF;
 END;
 $trap$;
 
-SELECT wasm.load(
+SELECT pgwasm.pgwasm_load(
     'ec_trap_mod',
     json_build_object(
         'bytes',
@@ -3186,7 +3186,7 @@ SELECT wasm.load(
 
 DO $$
 BEGIN
-    PERFORM wasm.ec_trap_mod__boom();
+    PERFORM pgwasm.ec_trap_mod__boom();
     RAISE EXCEPTION 'expected trap';
 EXCEPTION
     WHEN external_routine_exception THEN
@@ -3194,4 +3194,4 @@ EXCEPTION
 END
 $$;
 
-SELECT wasm.unload('ec_trap_mod', false) AS unloaded_trap_mod;
+SELECT pgwasm.pgwasm_unload('ec_trap_mod', false) AS unloaded_trap_mod;

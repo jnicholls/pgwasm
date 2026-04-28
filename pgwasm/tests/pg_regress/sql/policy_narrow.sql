@@ -6,13 +6,13 @@ DO $pn$
 DECLARE
     n text := 'pn_mod';
 BEGIN
-    IF EXISTS (SELECT 1 FROM wasm.modules WHERE name = n) THEN
-        PERFORM wasm.unload(n, true);
+    IF EXISTS (SELECT 1 FROM pgwasm.modules WHERE name = n) THEN
+        PERFORM pgwasm.pgwasm_unload(n, true);
     END IF;
 END;
 $pn$;
 
-SELECT wasm.load(
+SELECT pgwasm.pgwasm_load(
     'pn_mod',
     json_build_object(
         'bytes',
@@ -599,7 +599,7 @@ SELECT wasm.load(
 
 DO $$
 BEGIN
-    PERFORM wasm.load(
+    PERFORM pgwasm.pgwasm_load(
         'pn_mod_wide',
         json_build_object(
             'bytes',
@@ -1190,4 +1190,4 @@ EXCEPTION
 END
 $$;
 
-SELECT wasm.unload('pn_mod', false) AS unloaded_pn;
+SELECT pgwasm.pgwasm_unload('pn_mod', false) AS unloaded_pn;

@@ -17,13 +17,13 @@ BEGIN
     ]
     LOOP
         BEGIN
-            IF EXISTS (SELECT 1 FROM wasm.modules WHERE name = n) THEN
-                PERFORM wasm.unload(n, true);
+            IF EXISTS (SELECT 1 FROM pgwasm.modules WHERE name = n) THEN
+                PERFORM pgwasm.pgwasm_unload(n, true);
             END IF;
         EXCEPTION
             WHEN OTHERS THEN
                 BEGIN
-                    PERFORM wasm.test_force_cleanup_stuck_module(n, true);
+                    PERFORM pgwasm.pgwasm_test_force_cleanup_stuck_module(n, true);
                 EXCEPTION
                     WHEN OTHERS THEN
                         NULL;
@@ -33,7 +33,7 @@ BEGIN
 END;
 $lc$;
 
-SELECT wasm.load(
+SELECT pgwasm.pgwasm_load(
     'lc_arith',
     json_build_object(
         'bytes',
@@ -618,13 +618,13 @@ SELECT wasm.load(
 ) AS loaded_arith;
 
 SELECT name, abi, origin
-FROM wasm.modules
+FROM pgwasm.modules
 WHERE name = 'lc_arith'
 ORDER BY name;
 
-SELECT wasm.unload('lc_arith', false) AS unloaded_arith;
+SELECT pgwasm.pgwasm_unload('lc_arith', false) AS unloaded_arith;
 
-SELECT wasm.load(
+SELECT pgwasm.pgwasm_load(
     'lc_reload_src',
     json_build_object(
         'bytes',
@@ -1210,11 +1210,11 @@ SELECT wasm.load(
 
 CREATE TEMP TABLE lc_reload_baseline AS
 SELECT e.export_id, e.fn_oid, m.generation AS gen
-FROM wasm.exports e
-JOIN wasm.modules m ON m.module_id = e.module_id
+FROM pgwasm.exports e
+JOIN pgwasm.modules m ON m.module_id = e.module_id
 WHERE m.name = 'lc_reload_src';
 
-SELECT wasm.reload(
+SELECT pgwasm.pgwasm_reload(
     'lc_reload_src',
     json_build_object(
         'bytes',
@@ -1805,15 +1805,15 @@ SELECT
 FROM lc_reload_baseline b,
 LATERAL (
     SELECT e.export_id, e.fn_oid, m.generation AS gen
-    FROM wasm.exports e
-    JOIN wasm.modules m ON m.module_id = e.module_id
+    FROM pgwasm.exports e
+    JOIN pgwasm.modules m ON m.module_id = e.module_id
     WHERE m.name = 'lc_reload_src'
 ) cur;
 
-SELECT wasm.unload('lc_reload_src', false) AS unloaded_reload_src;
+SELECT pgwasm.pgwasm_unload('lc_reload_src', false) AS unloaded_reload_src;
 
 BEGIN;
-SELECT wasm.load(
+SELECT pgwasm.pgwasm_load(
     'lc_rb',
     json_build_object(
         'bytes',
@@ -2399,10 +2399,10 @@ SELECT wasm.load(
 ROLLBACK;
 
 SELECT COUNT(*) AS n_after_rb
-FROM wasm.modules
+FROM pgwasm.modules
 WHERE name = 'lc_rb';
 
-SELECT wasm.load(
+SELECT pgwasm.pgwasm_load(
     'lc_policy',
     json_build_object(
         'bytes',
@@ -2987,20 +2987,20 @@ SELECT wasm.load(
     )
 ) AS loaded_policy;
 
-SELECT wasm.reconfigure(
+SELECT pgwasm.pgwasm_reconfigure(
     'lc_policy',
     NULL,
     json_build_object('fuel_per_invocation', 5000)
 ) AS reconfigured_narrow;
 
 SELECT limits_json ->> 'fuel_per_invocation' AS fuel_after_narrow
-FROM wasm.modules
+FROM pgwasm.modules
 WHERE name = 'lc_policy'
 ORDER BY name;
 
 DO $$
 BEGIN
-    PERFORM wasm.reconfigure(
+    PERFORM pgwasm.pgwasm_reconfigure(
         'lc_policy',
         NULL,
         json_build_object('fuel_per_invocation', 99999999)
@@ -3012,9 +3012,9 @@ EXCEPTION
 END
 $$;
 
-SELECT wasm.unload('lc_policy', false) AS unloaded_policy;
+SELECT pgwasm.pgwasm_unload('lc_policy', false) AS unloaded_policy;
 
-SELECT wasm.load(
+SELECT pgwasm.pgwasm_load(
     'lc_hooks',
     json_build_object(
         'bytes',
@@ -3615,11 +3615,11 @@ SELECT wasm.load(
 )
 ) AS loaded_hooks;
 
-SELECT wasm.reconfigure('lc_hooks', NULL, NULL) AS reconfigured_hooks_ok;
+SELECT pgwasm.pgwasm_reconfigure('lc_hooks', NULL, NULL) AS reconfigured_hooks_ok;
 
-SELECT wasm.unload('lc_hooks', false) AS unloaded_hooks;
+SELECT pgwasm.pgwasm_unload('lc_hooks', false) AS unloaded_hooks;
 
-SELECT wasm.load(
+SELECT pgwasm.pgwasm_load(
     'lc_resources',
     json_build_object(
         'bytes',
@@ -4411,8 +4411,8 @@ SELECT wasm.load(
 ) AS loaded_resources;
 
 SELECT export_name, fn_oid
-FROM wasm.functions()
+FROM pgwasm.pgwasm_functions()
 WHERE module_name = 'lc_resources'
 ORDER BY export_name;
 
-SELECT wasm.unload('lc_resources', false) AS unloaded_resources;
+SELECT pgwasm.pgwasm_unload('lc_resources', false) AS unloaded_resources;

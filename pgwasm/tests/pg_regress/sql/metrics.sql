@@ -1,4 +1,4 @@
--- Monotone counters in wasm.stats() after wasm.test_bump_export_counters.
+-- Monotone counters in pgwasm.pgwasm_stats() after pgwasm.pgwasm_test_bump_export_counters.
 SELECT set_config('pgwasm.fuel_enabled', 'off', false);
 SELECT set_config('pgwasm.invocation_deadline_ms', '0', false);
 
@@ -6,13 +6,13 @@ DO $met$
 DECLARE
     n text := 'metrics_mod';
 BEGIN
-    IF EXISTS (SELECT 1 FROM wasm.modules WHERE name = n) THEN
-        PERFORM wasm.unload(n, true);
+    IF EXISTS (SELECT 1 FROM pgwasm.modules WHERE name = n) THEN
+        PERFORM pgwasm.pgwasm_unload(n, true);
     END IF;
 END;
 $met$;
 
-SELECT wasm.load(
+SELECT pgwasm.pgwasm_load(
     'metrics_mod',
     json_build_object(
         'bytes',
@@ -596,24 +596,24 @@ SELECT wasm.load(
 )
 ) AS loaded_metrics;
 
-SELECT wasm.test_bump_export_counters(m.module_id, 0, 2) AS bumped
-FROM wasm.modules m
+SELECT pgwasm.pgwasm_test_bump_export_counters(m.module_id, 0, 2) AS bumped
+FROM pgwasm.modules m
 WHERE m.name = 'metrics_mod';
 
-SELECT wasm.test_bump_export_counters(m.module_id, 0, 3) AS bumped_again
-FROM wasm.modules m
+SELECT pgwasm.pgwasm_test_bump_export_counters(m.module_id, 0, 3) AS bumped_again
+FROM pgwasm.modules m
 WHERE m.name = 'metrics_mod';
 
 SELECT export_name, invocations, traps, fuel_used_total
-FROM wasm.stats()
+FROM pgwasm.pgwasm_stats()
 WHERE module_name = 'metrics_mod'
 ORDER BY export_name;
 
 SELECT invocations >= 5 AS invocations_monotone
-FROM wasm.stats()
+FROM pgwasm.pgwasm_stats()
 WHERE module_name = 'metrics_mod' AND export_name = 'add';
 
 EXPLAIN (COSTS OFF, TIMING OFF)
-SELECT invocations FROM wasm.stats() WHERE module_name = 'metrics_mod';
+SELECT invocations FROM pgwasm.pgwasm_stats() WHERE module_name = 'metrics_mod';
 
-SELECT wasm.unload('metrics_mod', false) AS unloaded_metrics;
+SELECT pgwasm.pgwasm_unload('metrics_mod', false) AS unloaded_metrics;
