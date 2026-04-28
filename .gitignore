@@ -3,8 +3,6 @@
 .vscode/
 pgwasm.code-workspace
 /target
-pgwasm/target/
-pgwasm/tests/guests/**/target/
 *.iml
 **/*.rs.bk
 Cargo.lock

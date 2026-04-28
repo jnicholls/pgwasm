@@ -31,7 +31,7 @@ fn main() {
     println!("cargo:rerun-if-changed=tests/guests/write_query_guest/wit/deps/pgwasm-host/host.wit");
     println!("cargo:rerun-if-changed=tests/guests/write_query_guest/Cargo.toml");
 
-    let guest_target_dir = manifest_dir.join("target/guest_build");
+    let guest_target_dir = out_dir.join("guest_build");
     let _ = std::fs::create_dir_all(&guest_target_dir);
 
     for (name, rel_manifest, crate_name) in [
