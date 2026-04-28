@@ -134,7 +134,7 @@ hot/cold reconfiguration semantics.
 ## Development
 
 This is a [pgrx](https://github.com/pgcentralfoundation/pgrx) extension
-pinned to pgrx `0.18` with Wasmtime `43`. The repository is a Cargo
+pinned to pgrx `0.18` with Wasmtime `44`. The repository is a Cargo
 workspace; the extension crate is `pgwasm/`.
 
 Useful commands (see [AGENTS.md](AGENTS.md) for the authoritative testing
