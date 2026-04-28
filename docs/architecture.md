@@ -113,9 +113,6 @@ pgwasm/
     pgwasm--0.1.0.sql
   wit/                               # host WIT (path for bindgen in runtime/host)
     host.wit
-  fixtures/                          # guest components + core WAT for regress / build
-    components/
-    core/
   src/
     lib.rs                           # pgrx entry points + _PG_init
     guc.rs                           # GUC definitions
@@ -155,6 +152,9 @@ pgwasm/
       reconfigure.rs
     hooks.rs                         # on_load / on_unload / on_reconfigure
     views.rs                         # SRF table functions
+  tests/fixtures/                    # guest components + core WAT for pg_regress
+    components/
+    core/
   tests/pg_regress/
     sql/...
     expected/...
@@ -820,7 +820,8 @@ Matches the three-layer model in `AGENTS.md`:
 - **pg_regress** (`pgwasm/tests/pg_regress/`) — deterministic golden SQL for:
   lifecycle (`load → call → reconfigure → reload → unload`), each WIT type
   mapping (records, enums, variants, lists), policy narrowing, error classes.
-  Fixtures live under `pgwasm/fixtures/*.wat` and `*.wit`.
+  Fixtures live under `pgwasm/tests/fixtures/core/` (`.wat` / prebuilt `.wasm`)
+  and `pgwasm/tests/fixtures/components/` (WIT guests).
 - **In-backend unit tests** (`#[pg_test]` inside `pgwasm/src/**`) — exercise
   `policy::resolve`, `wit::typing`, `registry` cache coherence with
   generation bumps, trampoline error paths. Run with

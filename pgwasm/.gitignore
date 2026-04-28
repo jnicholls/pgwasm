@@ -10,4 +10,4 @@ Cargo.lock
 tests/pg_regress/results
 tests/pg_regress/regression.diffs
 tests/pg_regress/regression.out
-fixtures/components/**/target/
+tests/fixtures/components/**/target/

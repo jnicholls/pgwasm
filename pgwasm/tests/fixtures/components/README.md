@@ -1,4 +1,4 @@
-# Component test corpus (`pgwasm/fixtures/components`)
+# Component test corpus (`pgwasm/tests/fixtures/components`)
 
 Each subdirectory is a **standalone** Rust crate (not a workspace member) that builds a WebAssembly **component** for `pgwasm` regress tests.
 
@@ -30,8 +30,8 @@ python3 generate_pg_regress_sql.py
 Then refresh goldens if needed:
 
 ```bash
-cd ../..   # repo root
-cd pgwasm && cargo pgrx regress --resetdb
+cd ../../..   # pgwasm crate root (this file: tests/fixtures/components/)
+cargo pgrx regress --resetdb
 ```
 
 ## Fixture list

@@ -1,5 +1,5 @@
 -- WIT -> SQL round-trip for exports supported by automatic registration today (bool, s32, s64, string).
--- Additional corpus fixtures (records, enums, variants, list<u8>) live under fixtures/components/ for
+-- Additional corpus fixtures (records, enums, variants, list<u8>) live under tests/fixtures/components/ for
 -- manual builds; extend wit_wasm_type_to_pg_oid before exercising them from regress.
 SELECT set_config('pgwasm.fuel_enabled', 'off', false);
  set_config 

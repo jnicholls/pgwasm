@@ -3,7 +3,7 @@
 
 Run after `./build_all.sh`:
 
-  python3 pgwasm/fixtures/components/generate_pg_regress_sql.py
+  python3 pgwasm/tests/fixtures/components/generate_pg_regress_sql.py
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def read_wasm(name: str, root: pathlib.Path) -> bytes:
 
 def main() -> None:
     root = pathlib.Path(__file__).resolve().parent
-    out_sql = root.parent.parent / "tests" / "pg_regress" / "sql"
+    out_sql = root.parent.parent / "pg_regress" / "sql"
 
     arith = read_wasm("arith", root)
     hooks_wasm = read_wasm("hooks", root)
@@ -251,7 +251,7 @@ def main() -> None:
     wit_mapping_sql = textwrap.dedent(
         f"""\
         -- WIT -> SQL round-trip for exports supported by automatic registration today (bool, s32, s64, string).
-        -- Additional corpus fixtures (records, enums, variants, list<u8>) live under fixtures/components/ for
+        -- Additional corpus fixtures (records, enums, variants, list<u8>) live under tests/fixtures/components/ for
         -- manual builds; extend wit_wasm_type_to_pg_oid before exercising them from regress.
         SELECT set_config('pgwasm.fuel_enabled', 'off', false);
         SELECT set_config('pgwasm.invocation_deadline_ms', '0', false);

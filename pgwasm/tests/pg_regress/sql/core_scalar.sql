@@ -1,4 +1,4 @@
--- Core module scalar path: add_i32 fixture (binary matches pgwasm/fixtures/core/add_i32.wasm).
+-- Core module scalar path: add_i32 fixture (binary matches pgwasm/tests/fixtures/core/add_i32.wasm).
 SELECT set_config('pgwasm.fuel_enabled', 'off', false);
 SELECT set_config('pgwasm.invocation_deadline_ms', '0', false);
 
