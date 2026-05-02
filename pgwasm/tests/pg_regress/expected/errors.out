@@ -24,7 +24,7 @@ EXCEPTION
         IF _detail IS NULL OR position('module_id=none' in _detail) = 0 THEN
             RAISE EXCEPTION 'disabled: expected module_id=none in DETAIL, got: %', _detail;
         END IF;
-        IF position('wasmtime=43.0.0' in _detail) = 0 THEN
+        IF position('wasmtime=44.0.0' in _detail) = 0 THEN
             RAISE EXCEPTION 'disabled: expected wasmtime version in DETAIL, got: %', _detail;
         END IF;
 END
