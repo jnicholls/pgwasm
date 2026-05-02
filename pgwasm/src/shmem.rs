@@ -127,9 +127,12 @@ unsafe fn initialize_shared_state() {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ExportCounterKind {
+    #[allow(dead_code)]
     Errors,
     Invocations,
+    #[allow(dead_code)]
     Oom,
+    #[allow(dead_code)]
     RejectedByPolicy,
     TotalNs,
     Traps,

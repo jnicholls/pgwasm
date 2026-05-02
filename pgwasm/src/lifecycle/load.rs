@@ -19,6 +19,7 @@ use crate::catalog::{EXTENSION_SCHEMA, exports, modules, wit_types};
 use crate::config::{Abi as OptionsAbi, LoadOptions, PolicyOverrides};
 use crate::errors::{PgWasmError, Result};
 use crate::guc;
+use crate::hooks;
 use crate::policy::{self, EffectivePolicy, GucSnapshot};
 use crate::proc_reg::{self, Parallel, ProcSpec, Volatility};
 use crate::runtime::component;
@@ -136,6 +137,13 @@ pub(crate) fn load_impl(
     }
 }
 
+fn catalog_load_config_json(policy_json: &Value, limits_json: &Value) -> Result<Value> {
+    Ok(json!({
+        "limits": limits_json,
+        "policy": policy_json,
+    }))
+}
+
 fn catalog_policy_json(overrides: Option<&PolicyOverrides>) -> Result<Value> {
     let Some(p) = overrides else {
         return Ok(json!({}));
@@ -251,6 +259,8 @@ fn load_component_path(
     }
 
     let artifact_path = cwasm_path.display().to_string();
+    let load_hook_config = world_exports_function_named(&decoded, ON_LOAD_WASM_NAME)
+        .then(|| catalog_load_config_json(&policy_json, &limits_json));
     let updated = modules::NewModule {
         abi: "component".to_string(),
         artifact_path,
@@ -277,11 +287,8 @@ fn load_component_path(
         Ok(())
     })?;
 
-    if world_exports_function_named(&decoded, ON_LOAD_WASM_NAME) {
-        return Err(PgWasmError::InvalidConfiguration(
-            "module exports `on-load` hook; hook invocation is not wired yet (wave-4 hooks)"
-                .to_string(),
-        ));
+    if let Some(config) = load_hook_config {
+        hooks::on_load(module_id_u64, &config?)?;
     }
 
     shmem::bump_generation(module_id_u64);
@@ -501,7 +508,6 @@ fn parse_load_options(options: Option<pgrx::Json>) -> Result<LoadOptions> {
                     PgWasmError::InvalidConfiguration(format!("options.limits: {e}"))
                 })?);
             }
-            "on_load_hook" => out.on_load_hook = json_bool(&v, "on_load_hook")?,
             "overrides" => {
                 out.overrides = Some(serde_json::from_value(v).map_err(|e| {
                     PgWasmError::InvalidConfiguration(format!("options.overrides: {e}"))

@@ -5,6 +5,7 @@
 //! supplies OIDs.
 
 use std::collections::HashMap;
+#[cfg(feature = "pg_test")]
 use std::ffi::CStr;
 use std::num::NonZeroUsize;
 
@@ -74,6 +75,7 @@ pub(crate) enum MarshalPlan {
         names: Vec<String>,
     },
     Option(Box<MarshalPlan>),
+    #[cfg(feature = "pg_test")]
     Result {
         ok: Box<MarshalPlan>,
         err: Box<MarshalPlan>,
@@ -207,15 +209,6 @@ fn pg_type_to_marshal_plan(
     })
 }
 
-/// When `export.result` is `Some`, the last entry is the result plan; otherwise all are params.
-pub(crate) fn result_plan_from_marshalers<'a>(
-    plans: &'a [MarshalPlan],
-    export: &Export,
-) -> Option<&'a MarshalPlan> {
-    export.result.as_ref()?;
-    plans.last()
-}
-
 pub(crate) fn datum_to_val(
     plan: &MarshalPlan,
     datum: pg_sys::Datum,
@@ -328,6 +321,7 @@ fn read_tuple_element<A: WhoAllocated>(
     read_heap_attr_val(tup, plan, attno)
 }
 
+#[cfg(feature = "pg_test")]
 fn read_field_as_val<A: WhoAllocated>(
     tup: &PgHeapTuple<'_, A>,
     plan: &MarshalPlan,
@@ -370,6 +364,7 @@ fn read_field_as_val<A: WhoAllocated>(
     }
 }
 
+#[cfg(feature = "pg_test")]
 fn read_result_fields_from_heap_tuple<A: WhoAllocated>(
     tup: PgHeapTuple<'_, A>,
     ok_plan: &MarshalPlan,
@@ -444,6 +439,7 @@ fn datum_to_val_non_null(
             })?;
             Ok(Val::Flags(names_for_flag_bits(names, bits)?))
         }
+        #[cfg(feature = "pg_test")]
         MarshalPlan::Result { ok, err } => {
             let tup = unsafe { PgHeapTuple::from_composite_datum(datum) };
             read_result_fields_from_heap_tuple(tup, ok, err)
@@ -632,9 +628,11 @@ pub(crate) fn val_to_datum(
             })?;
             Ok((d, false))
         }
+        #[cfg(feature = "pg_test")]
         (MarshalPlan::Result { ok, err }, Val::Result(Ok(maybe))) => {
             build_result_composite(ok, err, maybe.as_deref(), true)
         }
+        #[cfg(feature = "pg_test")]
         (MarshalPlan::Result { ok, err }, Val::Result(Err(maybe))) => {
             build_result_composite(ok, err, maybe.as_deref(), false)
         }
@@ -750,6 +748,7 @@ pub(crate) fn val_to_datum(
     }
 }
 
+#[cfg(feature = "pg_test")]
 fn build_result_composite(
     ok_plan: &MarshalPlan,
     err_plan: &MarshalPlan,
@@ -785,6 +784,7 @@ fn build_result_composite(
     Ok((datum, false))
 }
 
+#[cfg(feature = "pg_test")]
 fn scalar_type_oid(plan: &MarshalPlan) -> Result<pg_sys::Oid, PgWasmError> {
     match plan {
         MarshalPlan::Scalar(ScalarKind::Bool) => Ok(pg_sys::BOOLOID),
@@ -798,6 +798,7 @@ fn scalar_type_oid(plan: &MarshalPlan) -> Result<pg_sys::Oid, PgWasmError> {
     }
 }
 
+#[cfg(feature = "pg_test")]
 fn heap_tuple_two_fields(
     ok_type: pg_sys::Oid,
     err_type: pg_sys::Oid,

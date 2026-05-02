@@ -10,8 +10,6 @@ use crate::errors::{ErrorContext, PgWasmError, Result};
 
 /// Default extension SQL schema (`pgwasm.control` `schema = pgwasm`).
 pub(crate) const EXTENSION_SCHEMA: &str = "pgwasm";
-/// `pg_extension.extname` for this extension.
-pub(crate) const EXTENSION_NAME: &str = "pgwasm";
 
 const CATALOG_SCHEMA: &str = EXTENSION_SCHEMA;
 
@@ -49,6 +47,7 @@ pub(crate) mod modules {
     pub(crate) struct ModuleRow {
         pub abi: String,
         pub artifact_path: String,
+        #[allow(dead_code)]
         pub created_at: TimestampWithTimeZone,
         pub digest: Vec<u8>,
         pub generation: i64,
@@ -298,6 +297,7 @@ pub(crate) mod exports {
         pub module_id: i64,
         pub ret_type: Option<pg_sys::Oid>,
         pub signature: Value,
+        #[allow(dead_code)]
         pub sql_name: String,
         pub wasm_name: String,
     }
@@ -341,6 +341,7 @@ pub(crate) mod exports {
         .map_err(|error| map_spi_error("inserting export row", error))
     }
 
+    #[cfg(feature = "pg_test")]
     pub(crate) fn get_by_id(export_id: i64) -> Result<Option<ExportRow>> {
         get_one_by("export_id = $1", export_id.into())
     }
@@ -556,10 +557,6 @@ pub(crate) mod wit_types {
         .map_err(|error| map_spi_error("inserting WIT type row", error))
     }
 
-    pub(crate) fn get_by_id(wit_type_id: i64) -> Result<Option<WitTypeRow>> {
-        get_one_by("wit_type_id = $1", wit_type_id.into())
-    }
-
     pub(crate) fn get_by_module_and_type_key(
         module_id: i64,
         type_key: &str,
@@ -657,24 +654,6 @@ pub(crate) mod wit_types {
             Ok(deleted > 0)
         })
         .map_err(|error| map_spi_error("deleting WIT type row", error))
-    }
-
-    fn get_one_by<'a>(
-        predicate: &str,
-        value: pgrx::datum::DatumWithOid<'a>,
-    ) -> Result<Option<WitTypeRow>> {
-        let sql = format!(
-            "SELECT {RETURNING_COLUMNS}
-             FROM {CATALOG_SCHEMA}.wit_types
-             WHERE {predicate}"
-        );
-
-        Spi::connect(|client| {
-            let args = vec![value];
-            maybe_first(client.select(sql.as_str(), Some(1), args.as_slice())?)
-                .and_then(|maybe_row| maybe_row.map(|row| wit_type_from_row(&row)).transpose())
-        })
-        .map_err(|error| map_spi_error("reading WIT type row", error))
     }
 
     fn wit_type_from_row(

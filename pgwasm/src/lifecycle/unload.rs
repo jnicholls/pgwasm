@@ -303,6 +303,7 @@ fn active_module_ids() -> Result<BTreeSet<u64>> {
 /// `#[pg_test]` runs each test inside a client transaction that the framework **rolls back** after
 /// the test returns, so `PgXactCallbackEvent::Commit` never fires there; tests that need to
 /// assert on-disk behavior call this explicitly after `unload_impl` (see `lib.rs` tests).
+#[cfg(feature = "pg_test")]
 pub(crate) fn run_post_commit_unload_work(module_id_u64: u64) {
     let active = match active_module_ids() {
         Ok(ids) => ids,
