@@ -15,10 +15,9 @@
 use sha2::{Digest, Sha256};
 use std::{
     cell::Cell,
-    collections::{BTreeSet, hash_map::DefaultHasher},
+    collections::BTreeSet,
     fmt::Write as _,
     fs::{self, File, OpenOptions},
-    hash::{Hash, Hasher},
     io::{self, ErrorKind, Write as _},
     path::{Path, PathBuf},
     sync::OnceLock,
@@ -30,11 +29,19 @@ use std::sync::Mutex;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 
+#[cfg(all(test, not(feature = "pg_test")))]
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
+
+#[cfg(all(test, not(feature = "pg_test")))]
 use wasmtime::{Engine, Precompiled};
 
 use crate::errors::PgWasmError;
 
 pub(crate) const ARTIFACTS_DIRNAME: &str = "pgwasm";
+#[cfg(all(test, not(feature = "pg_test")))]
 pub(crate) const COMPAT_HASH_FILENAME: &str = "compat_hash";
 pub(crate) const CHECKSUM_FILENAME: &str = "sha256";
 pub(crate) const MODULE_CWASM_FILENAME: &str = "module.cwasm";
@@ -56,7 +63,7 @@ thread_local! {
 }
 
 #[cfg(unix)]
-struct ArtifactFlockGuard(File);
+struct ArtifactFlockGuard(#[allow(dead_code)] File);
 
 #[cfg(unix)]
 impl ArtifactFlockGuard {
@@ -175,13 +182,6 @@ pub(crate) fn write_module_wasm(module_id: u64, bytes: &[u8]) -> io::Result<Path
     Ok(path)
 }
 
-pub(crate) fn write_module_cwasm(module_id: u64, bytes: &[u8]) -> io::Result<PathBuf> {
-    let module_dir = ensure_module_dir(module_id)?;
-    let path = module_dir.join(MODULE_CWASM_FILENAME);
-    write_atomic(&path, bytes)?;
-    Ok(path)
-}
-
 pub(crate) fn write_world_wit(module_id: u64, world_wit: &str) -> io::Result<PathBuf> {
     let module_dir = ensure_module_dir(module_id)?;
     let path = module_dir.join(WORLD_WIT_FILENAME);
@@ -247,6 +247,7 @@ pub(crate) fn write_checksum(module_dir: &Path, sha: &[u8; 32]) -> io::Result<()
     )
 }
 
+#[cfg(all(test, not(feature = "pg_test")))]
 pub(crate) fn verify_checksum(module_dir: &Path) -> Result<(), PgWasmError> {
     let module_bytes = fs::read(module_dir.join(MODULE_WASM_FILENAME))?;
     let expected_sha = parse_checksum_sidecar(&module_dir.join(CHECKSUM_FILENAME))?;
@@ -262,6 +263,7 @@ pub(crate) fn verify_checksum(module_dir: &Path) -> Result<(), PgWasmError> {
     Ok(())
 }
 
+#[cfg(all(test, not(feature = "pg_test")))]
 pub(crate) fn prune_stale(active_ids: &BTreeSet<u64>) -> io::Result<usize> {
     with_artifact_fs_lock(|| prune_stale_unlocked(active_ids))
 }
@@ -374,6 +376,7 @@ fn parse_module_id_dir_name(dir_name: &str) -> Option<u64> {
     u64::from_str_radix(dir_name, 16).ok()
 }
 
+#[cfg(all(test, not(feature = "pg_test")))]
 fn parse_checksum_sidecar(sidecar_path: &Path) -> Result<[u8; 32], PgWasmError> {
     let contents = fs::read_to_string(sidecar_path)?;
     let line = contents
@@ -402,6 +405,7 @@ fn parse_checksum_sidecar(sidecar_path: &Path) -> Result<[u8; 32], PgWasmError> 
     decode_sha256_hex(checksum_hex)
 }
 
+#[cfg(all(test, not(feature = "pg_test")))]
 fn decode_sha256_hex(input: &str) -> Result<[u8; 32], PgWasmError> {
     if !input.is_ascii() || input.len() != 64 {
         return Err(PgWasmError::InvalidModule(
@@ -430,6 +434,7 @@ fn sha256_hex(sha: &[u8; 32]) -> String {
     text
 }
 
+#[cfg(all(test, not(feature = "pg_test")))]
 fn compat_hash_hex(bytes: &[u8]) -> String {
     let mut text = String::with_capacity(bytes.len().saturating_mul(2));
     for byte in bytes {
@@ -438,6 +443,7 @@ fn compat_hash_hex(bytes: &[u8]) -> String {
     text
 }
 
+#[cfg(all(test, not(feature = "pg_test")))]
 fn engine_precompile_fingerprint(engine: &Engine) -> [u8; 32] {
     let mut hasher = DefaultHasher::new();
     engine.precompile_compatibility_hash().hash(&mut hasher);
@@ -447,6 +453,7 @@ fn engine_precompile_fingerprint(engine: &Engine) -> [u8; 32] {
     out
 }
 
+#[cfg(all(test, not(feature = "pg_test")))]
 fn decode_compat_hash_hex(input: &str) -> io::Result<Vec<u8>> {
     let input = input.trim();
     if input.is_empty() {
@@ -478,13 +485,16 @@ fn decode_compat_hash_hex(input: &str) -> io::Result<Vec<u8>> {
 }
 
 /// Expected precompiled artifact kind on disk (`module.cwasm`).
+#[cfg(all(test, not(feature = "pg_test")))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ExpectedKind {
     Component,
+    #[allow(dead_code)]
     Core,
 }
 
 /// Outcome of validating `module.cwasm` and its `compat_hash` sidecar against a live [`Engine`].
+#[cfg(all(test, not(feature = "pg_test")))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CompatCheck {
     MissingRecompile,
@@ -492,11 +502,13 @@ pub(crate) enum CompatCheck {
     StaleRecompile,
 }
 
+#[cfg(all(test, not(feature = "pg_test")))]
 pub(crate) fn write_compat_hash(module_dir: &Path, hash: &[u8]) -> io::Result<()> {
     let text = format!("{}\n", compat_hash_hex(hash));
     write_atomic(&module_dir.join(COMPAT_HASH_FILENAME), text.as_bytes())
 }
 
+#[cfg(all(test, not(feature = "pg_test")))]
 pub(crate) fn read_compat_hash(module_dir: &Path) -> io::Result<Option<Vec<u8>>> {
     let path = module_dir.join(COMPAT_HASH_FILENAME);
     match fs::read_to_string(&path) {
@@ -515,6 +527,7 @@ pub(crate) fn read_compat_hash(module_dir: &Path) -> io::Result<Option<Vec<u8>>>
     }
 }
 
+#[cfg(all(test, not(feature = "pg_test")))]
 pub(crate) fn check_compat(
     module_dir: &Path,
     engine: &Engine,
@@ -558,6 +571,7 @@ pub(crate) fn check_compat(
     Ok(CompatCheck::Ok)
 }
 
+#[cfg(all(test, not(feature = "pg_test")))]
 pub(crate) fn invalidate_cwasm(module_dir: &Path) -> io::Result<()> {
     let cwasm = module_dir.join(MODULE_CWASM_FILENAME);
     match fs::remove_file(&cwasm) {

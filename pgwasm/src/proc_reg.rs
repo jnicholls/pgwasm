@@ -13,10 +13,8 @@ use crate::errors::PgWasmError;
 const EXTENSION_LIBRARY_PATH: &str = "$libdir/pgwasm";
 const TRAMPOLINE_SYMBOL: &str = "pgwasm_udf_trampoline";
 
-#[cfg(any(feature = "pg17", feature = "pg18"))]
-type ProcSqlBody = *mut pg_sys::Node;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
 pub(crate) enum ProcArgMode {
     In,
     Out,
@@ -36,6 +34,7 @@ impl ProcArgMode {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
 pub(crate) enum Volatility {
     Immutable,
     Stable,
@@ -53,6 +52,7 @@ impl Volatility {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)]
 pub(crate) enum Parallel {
     Safe,
     Restricted,

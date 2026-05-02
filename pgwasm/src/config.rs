@@ -42,7 +42,6 @@ pub(crate) struct LoadOptions {
     pub(crate) breaking_changes_allowed: bool,
     pub(crate) cascade: Option<bool>,
     pub(crate) limits: Option<Limits>,
-    pub(crate) on_load_hook: bool,
     pub(crate) overrides: Option<PolicyOverrides>,
     pub(crate) replace_exports: bool,
 }

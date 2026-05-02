@@ -66,6 +66,7 @@ pub(crate) fn register_type_plan(
 }
 
 /// Drop catalog rows and issue `DROP TYPE` / `DROP DOMAIN` for each registered type.
+#[cfg(feature = "pg_test")]
 pub(crate) fn unregister_module_types(module_id: u64, cascade: bool) -> Result<()> {
     let mid = i64::try_from(module_id)
         .map_err(|_| PgWasmError::Internal("module_id does not fit i64".to_string()))?;
@@ -396,6 +397,7 @@ fn fq_type_name(oid: pg_sys::Oid) -> Result<String> {
         .ok_or_else(|| PgWasmError::Internal("type oid not found".to_string()))
 }
 
+#[cfg(feature = "pg_test")]
 fn drop_type_oid(oid: pg_sys::Oid, cascade: bool) -> Result<()> {
     if !type_is_in_schema(oid, CATALOG_SCHEMA)? {
         return Ok(());
@@ -446,6 +448,7 @@ fn insert_catalog_row(
     Ok(())
 }
 
+#[cfg(feature = "pg_test")]
 fn type_is_in_schema(type_oid: pg_sys::Oid, schema: &str) -> Result<bool> {
     if type_oid == pg_sys::InvalidOid {
         return Ok(false);
