@@ -260,8 +260,7 @@ fn load_component_path(
 
     let artifact_path = cwasm_path.display().to_string();
     let load_hook_config = world_exports_function_named(&decoded, ON_LOAD_WASM_NAME)
-        .then_some(())
-        .map(|_| catalog_load_config_json(&policy_json, &limits_json));
+        .then(|| catalog_load_config_json(&policy_json, &limits_json));
     let updated = modules::NewModule {
         abi: "component".to_string(),
         artifact_path,
