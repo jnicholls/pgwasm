@@ -133,3 +133,29 @@ For regress SQL, keep output **deterministic** (`ORDER BY`, stable data, `EXPLAI
 - Regress: `cargo pgrx regress` (and flags from pgrx for a single PG version or test name).
 - In-Postgres units: `cargo pgrx test -p pgwasm`.
 - Integration: `cargo test -p tests` after `cargo pgrx install` / `cargo pgrx start` (or your own Postgres) and **`DATABASE_URL`** set; with pgrx-managed Postgres, port is often **`28800 + major version`** (see ParadeDB’s [`tests/README.md`](https://github.com/paradedb/paradedb/blob/main/tests/README.md)).
+
+## Cursor Cloud specific instructions
+
+### Services overview
+
+| Service | How to start | Notes |
+|---------|-------------|-------|
+| **PostgreSQL 17** (pgrx-managed) | `cargo pgrx start pg17` | Port **28817**. Extension must be installed first via `cargo pgrx install`. |
+
+### CI test commands (run in this order)
+
+All five CI steps are documented in `.github/workflows/ci.yml`. In summary:
+
+1. `cargo fmt --all -- --check` — stable rustfmt passes (warnings about unstable features are expected; nightly is available at `+nightly-2026-05-06` for actual formatting)
+2. `cargo clippy --workspace -- -D warnings`
+3. `cargo test --workspace` — host-only tests (52 tests); integration tests in `tests/` crate are `#[ignore]`
+4. `cargo pgrx test pg17 -p pgwasm` — 35 in-backend `#[pg_test]` tests
+5. `cargo pgrx regress pg17 --resetdb -p pgwasm` — 11 SQL golden tests
+
+### Non-obvious caveats
+
+- **`rustfmt.toml` uses unstable features** (`group_imports`, `imports_granularity`). With stable Rust, `cargo fmt --all -- --check` passes but emits warnings. Use `cargo +nightly-2026-05-06 fmt --all` to actually format code with those rules applied.
+- **`cargo pgrx test` rebuilds and reinstalls the extension** before running tests; you do not need to manually `cargo pgrx install` first for that command.
+- **`cargo pgrx regress` also reinstalls** the extension. Use `--resetdb` to force a clean database for deterministic results.
+- **Integration tests** (`cargo test -p tests -- --ignored --test-threads=1`) require a running pgrx-managed Postgres with the extension installed (`cargo pgrx install --features "pg17 pg_test" --no-default-features && cargo pgrx start pg17`). Set `DATABASE_URL=postgres://localhost:28817/pgwasm_itest`. These are **not part of CI**.
+- **pgrx init** must be run once per environment: `cargo pgrx init --pg17 /usr/lib/postgresql/17/bin/pg_config`. The update script handles this idempotently.
