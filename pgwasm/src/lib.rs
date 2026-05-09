@@ -32,8 +32,10 @@ pub extern "C-unwind" fn _PG_init() {
 mod sql_api {
     use pgrx::prelude::*;
 
-    use crate::errors::{ErrorContext, IntoReport};
-    use crate::lifecycle::{load, reconfigure, unload};
+    use crate::{
+        errors::{ErrorContext, IntoReport},
+        lifecycle::{load, reconfigure, reload, unload},
+    };
 
     #[pg_extern(name = "pgwasm_load")]
     fn load(
@@ -54,6 +56,21 @@ mod sql_api {
             .or_report(ErrorContext::default())
     }
 
+    #[pg_extern(name = "pgwasm_reload")]
+    fn reload(
+        module_name: &str,
+        bytes_or_path: pgrx::Json,
+        options: default!(Option<pgrx::Json>, NULL),
+    ) -> bool {
+        reload::reload_impl(module_name, bytes_or_path, options).or_report(ErrorContext::default())
+    }
+
+    #[pg_extern(name = "pgwasm_test_force_cleanup_stuck_module")]
+    fn test_force_cleanup_stuck_module(module_name: &str, cascade: default!(bool, true)) -> bool {
+        unload::force_cleanup_orphaned_module_impl(module_name, cascade)
+            .or_report(ErrorContext::default())
+    }
+
     #[pg_extern(name = "pgwasm_unload")]
     fn unload(module_name: &str, cascade: default!(bool, false)) -> bool {
         unload::unload_impl(module_name, cascade).or_report(ErrorContext::default())
@@ -65,6 +82,153 @@ mod sql_api {
             .map(|n| n as i64)
             .or_report(ErrorContext::default())
     }
+}
+
+mod views_api {
+    use pgrx::{JsonB, pg_sys::Oid, prelude::*};
+
+    use crate::{
+        errors::{ErrorContext, IntoReport},
+        views,
+    };
+
+    #[allow(clippy::type_complexity)]
+    #[pg_extern(parallel_safe, stable, name = "pgwasm_modules")]
+    fn pgwasm_modules() -> TableIterator<
+        'static,
+        (
+            name!(module_id, i64),
+            name!(name, String),
+            name!(origin, String),
+            name!(digest, Vec<u8>),
+            name!(loaded_at, TimestampWithTimeZone),
+            name!(policy_json, JsonB),
+            name!(limits_json, JsonB),
+            name!(shared, bool),
+        ),
+    > {
+        views::modules_sql().or_report(ErrorContext::default())
+    }
+
+    #[allow(clippy::type_complexity)]
+    #[pg_extern(parallel_safe, stable, name = "pgwasm_functions")]
+    fn pgwasm_functions() -> TableIterator<
+        'static,
+        (
+            name!(module_name, String),
+            name!(export_name, String),
+            name!(fn_oid, Option<Oid>),
+            name!(arg_types, Vec<Oid>),
+            name!(ret_type, Option<Oid>),
+            name!(abi, String),
+            name!(last_seen_generation, i64),
+        ),
+    > {
+        views::functions_sql().or_report(ErrorContext::default())
+    }
+
+    #[allow(clippy::type_complexity)]
+    #[pg_extern(parallel_safe, stable, name = "pgwasm_wit_types")]
+    fn pgwasm_wit_types() -> TableIterator<
+        'static,
+        (
+            name!(module_name, String),
+            name!(type_key, String),
+            name!(kind, String),
+            name!(pg_type_oid, Oid),
+            name!(last_seen_generation, i64),
+        ),
+    > {
+        views::wit_types_sql().or_report(ErrorContext::default())
+    }
+
+    #[allow(clippy::type_complexity)]
+    #[pg_extern(parallel_safe, stable, name = "pgwasm_policy_effective")]
+    fn pgwasm_policy_effective() -> TableIterator<
+        'static,
+        (
+            name!(module_name, String),
+            name!(policy_json, JsonB),
+            name!(limits_json, JsonB),
+        ),
+    > {
+        views::policy_effective_sql().or_report(ErrorContext::default())
+    }
+
+    #[allow(clippy::type_complexity)]
+    #[pg_extern(parallel_unsafe, stable, name = "pgwasm_stats")]
+    fn pgwasm_stats() -> TableIterator<
+        'static,
+        (
+            name!(module_name, String),
+            name!(export_name, String),
+            name!(invocations, i64),
+            name!(traps, i64),
+            name!(fuel_used_total, i64),
+            name!(last_invocation_at, Option<TimestampWithTimeZone>),
+            name!(shared, bool),
+        ),
+    > {
+        views::stats_sql().or_report(ErrorContext::default())
+    }
+
+    #[pg_extern(parallel_unsafe, stable, name = "pgwasm_test_scrub_shmem_slots")]
+    fn pgwasm_test_scrub_shmem_slots(from_id: i64, to_id: i64) -> i64 {
+        views::test_scrub_shmem_slots(from_id, to_id).or_report(ErrorContext::default())
+    }
+
+    #[pg_extern(parallel_unsafe, stable, name = "pgwasm_test_bump_export_counters")]
+    fn pgwasm_test_bump_export_counters(module_id: i64, export_index: i32, n: i64) -> i64 {
+        views::test_bump_export_counters(module_id, export_index, n)
+            .or_report(ErrorContext::default())
+    }
+
+    pgrx::extension_sql!(
+        r#"
+-- Observability SRF grants: reader role `pgwasm_reader` is created in pgwasm--0.1.0.sql.
+
+GRANT EXECUTE ON FUNCTION
+    @extschema@.pgwasm_modules(),
+    @extschema@.pgwasm_functions(),
+    @extschema@.pgwasm_wit_types(),
+    @extschema@.pgwasm_policy_effective(),
+    @extschema@.pgwasm_stats()
+TO pgwasm_reader;
+
+CREATE OR REPLACE VIEW @extschema@.modules_view AS
+    SELECT * FROM @extschema@.pgwasm_modules();
+
+CREATE OR REPLACE VIEW @extschema@.functions_view AS
+    SELECT * FROM @extschema@.pgwasm_functions();
+
+CREATE OR REPLACE VIEW @extschema@.wit_types_view AS
+    SELECT * FROM @extschema@.pgwasm_wit_types();
+
+CREATE OR REPLACE VIEW @extschema@.policy_effective_view AS
+    SELECT * FROM @extschema@.pgwasm_policy_effective();
+
+CREATE OR REPLACE VIEW @extschema@.stats_view AS
+    SELECT * FROM @extschema@.pgwasm_stats();
+
+GRANT SELECT ON TABLE
+    @extschema@.modules_view,
+    @extschema@.functions_view,
+    @extschema@.wit_types_view,
+    @extschema@.policy_effective_view,
+    @extschema@.stats_view
+TO pgwasm_reader;
+"#,
+        name = "views_grants_and_aliases",
+        requires = [
+            pgwasm_functions,
+            pgwasm_modules,
+            pgwasm_policy_effective,
+            pgwasm_stats,
+            pgwasm_test_bump_export_counters,
+            pgwasm_test_scrub_shmem_slots,
+            pgwasm_wit_types,
+        ],
+    );
 }
 
 #[cfg(feature = "pg_test")]

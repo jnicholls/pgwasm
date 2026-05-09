@@ -1,16 +1,20 @@
 //! SQL-facing observability views and SRF adapters.
 
-use pgrx::JsonB;
-use pgrx::pg_sys::Oid;
-use pgrx::prelude::*;
-use pgrx::spi::{self, Spi};
+use pgrx::{
+    JsonB,
+    pg_sys::Oid,
+    prelude::*,
+    spi::{self, Spi},
+};
 use serde_json::{Map, Value};
 
-use crate::catalog::{exports, modules, wit_types};
-use crate::errors::{PgWasmError, Result};
-use crate::lifecycle::reconfigure;
-use crate::policy::{self, GucSnapshot};
-use crate::shmem::{self, ExportCounterKind};
+use crate::{
+    catalog::{exports, modules, wit_types},
+    errors::{PgWasmError, Result},
+    lifecycle::reconfigure,
+    policy::{self, GucSnapshot},
+    shmem::{self, ExportCounterKind},
+};
 
 fn module_export_metrics_in_shmem(module_id: i64) -> Result<bool> {
     let exports = exports::list_by_module(module_id)?;
@@ -28,7 +32,6 @@ fn module_export_metrics_in_shmem(module_id: i64) -> Result<bool> {
 
 /// SRF over catalog `pgwasm.modules` with `shared` from shared-memory slot state.
 #[allow(clippy::type_complexity)]
-#[pg_extern(parallel_safe, stable, name = "pgwasm_modules")]
 pub(crate) fn modules_sql() -> Result<
     TableIterator<
         'static,
@@ -66,7 +69,6 @@ pub(crate) fn modules_sql() -> Result<
 
 /// SRF over catalog `pgwasm.exports` joined to module names.
 #[allow(clippy::type_complexity)]
-#[pg_extern(parallel_safe, stable, name = "pgwasm_functions")]
 pub(crate) fn functions_sql() -> Result<
     TableIterator<
         'static,
@@ -112,7 +114,6 @@ pub(crate) fn functions_sql() -> Result<
 
 /// SRF over catalog `pgwasm.wit_types` joined to module names.
 #[allow(clippy::type_complexity)]
-#[pg_extern(parallel_safe, stable, name = "pgwasm_wit_types")]
 pub(crate) fn wit_types_sql() -> Result<
     TableIterator<
         'static,
@@ -155,7 +156,6 @@ pub(crate) fn wit_types_sql() -> Result<
 
 /// One row per module: resolved effective policy and limits as JSONB.
 #[allow(clippy::type_complexity)]
-#[pg_extern(parallel_safe, stable, name = "pgwasm_policy_effective")]
 pub(crate) fn policy_effective_sql() -> Result<
     TableIterator<
         'static,
@@ -183,7 +183,6 @@ pub(crate) fn policy_effective_sql() -> Result<
 
 /// Per-export counters from shared memory (or zeros when no slot / overflow).
 #[allow(clippy::type_complexity)]
-#[pg_extern(parallel_unsafe, stable, name = "pgwasm_stats")]
 pub(crate) fn stats_sql() -> Result<
     TableIterator<
         'static,
@@ -322,7 +321,6 @@ fn effective_limits_to_json(e: &policy::EffectivePolicy) -> Value {
 /// Best-effort release of metric slots for `module_id` in `from_id..=to_id` (inclusive).
 /// Used by pg_regress: catalog rows are dropped when the database is recreated, but add-in
 /// shared memory survives across `DROP DATABASE`, so stale `module_id` keys must be cleared.
-#[pg_extern(parallel_unsafe, stable, name = "pgwasm_test_scrub_shmem_slots")]
 pub(crate) fn test_scrub_shmem_slots(from_id: i64, to_id: i64) -> Result<i64> {
     require_superuser_for_test_hooks()?;
     if from_id < 1 || to_id < from_id {
@@ -340,7 +338,6 @@ pub(crate) fn test_scrub_shmem_slots(from_id: i64, to_id: i64) -> Result<i64> {
 
 /// Regression / manual hook: bump invocation counters for `(module_id, export_index)`.
 /// Restricted to superusers so arbitrary roles cannot inflate metrics.
-#[pg_extern(parallel_unsafe, stable, name = "pgwasm_test_bump_export_counters")]
 pub(crate) fn test_bump_export_counters(module_id: i64, export_index: i32, n: i64) -> Result<i64> {
     require_superuser_for_test_hooks()?;
     if n <= 0 {
@@ -392,50 +389,3 @@ fn require_superuser_for_test_hooks() -> Result<()> {
         ))
     }
 }
-
-pgrx::extension_sql!(
-    r#"
--- Observability SRF grants: reader role `pgwasm_reader` is created in pgwasm--0.1.0.sql.
-
-GRANT EXECUTE ON FUNCTION
-    @extschema@.pgwasm_modules(),
-    @extschema@.pgwasm_functions(),
-    @extschema@.pgwasm_wit_types(),
-    @extschema@.pgwasm_policy_effective(),
-    @extschema@.pgwasm_stats()
-TO pgwasm_reader;
-
-CREATE OR REPLACE VIEW @extschema@.modules_view AS
-    SELECT * FROM @extschema@.pgwasm_modules();
-
-CREATE OR REPLACE VIEW @extschema@.functions_view AS
-    SELECT * FROM @extschema@.pgwasm_functions();
-
-CREATE OR REPLACE VIEW @extschema@.wit_types_view AS
-    SELECT * FROM @extschema@.pgwasm_wit_types();
-
-CREATE OR REPLACE VIEW @extschema@.policy_effective_view AS
-    SELECT * FROM @extschema@.pgwasm_policy_effective();
-
-CREATE OR REPLACE VIEW @extschema@.stats_view AS
-    SELECT * FROM @extschema@.pgwasm_stats();
-
-GRANT SELECT ON TABLE
-    @extschema@.modules_view,
-    @extschema@.functions_view,
-    @extschema@.wit_types_view,
-    @extschema@.policy_effective_view,
-    @extschema@.stats_view
-TO pgwasm_reader;
-"#,
-    name = "views_grants_and_aliases",
-    requires = [
-        modules_sql,
-        functions_sql,
-        wit_types_sql,
-        policy_effective_sql,
-        stats_sql,
-        test_bump_export_counters,
-        test_scrub_shmem_slots,
-    ],
-);

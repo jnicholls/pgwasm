@@ -12,38 +12,37 @@
 //! the one active when reload registered the callback.) On **commit**, the pre-swap snapshots are
 //! dropped and no file restore runs.
 
-use std::collections::HashMap;
-use std::fs;
-use std::io::{self, ErrorKind};
-use std::path::{Component, Path, PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    io::{self, ErrorKind},
+    path::{Component, Path, PathBuf},
+};
 
-use pgrx::prelude::*;
-use pgrx::spi::{self, Spi};
-use pgrx::{PgSubXactCallbackEvent, register_subxact_callback};
+use pgrx::{
+    PgSubXactCallbackEvent,
+    prelude::*,
+    register_subxact_callback,
+    spi::{self, Spi},
+};
 use serde_json::{Value, json};
 use wasmparser::{CompositeInnerType, ExternalKind, Parser, Payload, ValType};
 use wit_parser::{Function, FunctionKind, Type, WorldItem, WorldKey};
 
-use crate::abi::{self, Abi, AbiOverride};
-use crate::artifacts;
-use crate::catalog::{EXTENSION_SCHEMA, exports, modules, wit_types};
-use crate::config::{Abi as OptionsAbi, LoadOptions, PolicyOverrides};
-use crate::errors::{ErrorContext, IntoReport, PgWasmError, Result};
-use crate::guc;
-use crate::hooks;
-use crate::policy::{self, EffectivePolicy, GucSnapshot};
-use crate::proc_reg::{self, Parallel, ProcSpec, Volatility};
-use crate::runtime::component;
-use crate::runtime::core as runtime_core;
-use crate::runtime::engine;
-use crate::runtime::pool;
-use crate::shmem;
-use crate::wit::typing;
-use crate::wit::udt;
-use crate::wit::world;
-
 use super::reconfigure;
-use super::unload;
+use crate::{
+    abi::{self, Abi, AbiOverride},
+    artifacts,
+    catalog::{EXTENSION_SCHEMA, exports, modules, wit_types},
+    config::{Abi as OptionsAbi, LoadOptions, PolicyOverrides},
+    errors::{PgWasmError, Result},
+    guc, hooks,
+    policy::{self, EffectivePolicy, GucSnapshot},
+    proc_reg::{self, Parallel, ProcSpec, Volatility},
+    runtime::{component, core as runtime_core, engine, pool},
+    shmem,
+    wit::{typing, udt, world},
+};
 
 const ON_LOAD_WASM_NAME: &str = "on-load";
 const ON_RECONFIGURE_WASM_NAME: &str = "on-reconfigure";
@@ -112,24 +111,6 @@ struct RollbackPaths {
     cwasm: PathBuf,
     wasm: PathBuf,
     wit: PathBuf,
-}
-
-/// `pgwasm.pgwasm_reload(module_name, bytes_or_path, options)` — see architecture doc "Reload lifecycle".
-#[pg_extern(name = "pgwasm_reload")]
-pub fn reload(
-    module_name: &str,
-    bytes_or_path: pgrx::Json,
-    options: default!(Option<pgrx::Json>, NULL),
-) -> bool {
-    reload_impl(module_name, bytes_or_path, options).or_report(ErrorContext::default())
-}
-
-/// Superuser-only regress hook: remove a module whose catalog row survived a failed `unload`
-/// (stale `fn_oid` references after `RemoveFunctionById`).
-#[pg_extern(name = "pgwasm_test_force_cleanup_stuck_module")]
-pub fn test_force_cleanup_stuck_module(module_name: &str, cascade: default!(bool, true)) -> bool {
-    unload::force_cleanup_orphaned_module_impl(module_name, cascade)
-        .or_report(ErrorContext::default())
 }
 
 pub(crate) fn reload_impl(
