@@ -18,7 +18,7 @@ mod trampoline;
 mod views;
 mod wit;
 
-::pgrx::pg_module_magic!(name, version);
+pg_module_magic!(name, version);
 
 #[allow(non_snake_case)]
 #[pg_guard]
@@ -30,43 +30,40 @@ pub extern "C-unwind" fn _PG_init() {
 }
 
 mod sql_api {
-    #![allow(clippy::result_large_err)]
+    use pgrx::{pg_sys::panic::ErrorReport, prelude::*};
 
-    use pgrx::prelude::*;
-
-    #[pg_extern(name = "pgwasm_reconfigure")]
-    fn reconfigure(
-        module_name: &str,
-        policy: Option<pgrx::Json>,
-        limits: Option<pgrx::Json>,
-    ) -> core::result::Result<bool, pgrx::pg_sys::panic::ErrorReport> {
-        crate::lifecycle::reconfigure::reconfigure_impl(module_name, policy, limits)
-            .map_err(crate::errors::PgWasmError::into_error_report)
-    }
-
-    #[pg_extern(name = "pgwasm_unload")]
-    fn unload(
-        module_name: &str,
-        cascade: default!(bool, false),
-    ) -> core::result::Result<bool, pgrx::pg_sys::panic::ErrorReport> {
-        crate::lifecycle::unload::unload_impl(module_name, cascade)
-            .map_err(crate::errors::PgWasmError::into_error_report)
-    }
-
-    #[pg_extern(name = "pgwasm_unload_all")]
-    fn unload_all() -> core::result::Result<i64, pgrx::pg_sys::panic::ErrorReport> {
-        crate::lifecycle::unload::unload_all_impl()
-            .map(|n| n as i64)
-            .map_err(crate::errors::PgWasmError::into_error_report)
-    }
+    use crate::lifecycle::{load, reconfigure, unload};
 
     #[pg_extern(name = "pgwasm_load")]
     fn load(
         module_name: &str,
         bytes_or_path: pgrx::Json,
         options: default!(Option<pgrx::Json>, NULL),
-    ) -> core::result::Result<bool, pgrx::pg_sys::panic::ErrorReport> {
-        crate::lifecycle::load::load_impl(module_name, bytes_or_path, options)
+    ) -> Result<bool, ErrorReport> {
+        load::load_impl(module_name, bytes_or_path, options)
+            .map_err(crate::errors::PgWasmError::into_error_report)
+    }
+
+    #[pg_extern(name = "pgwasm_reconfigure")]
+    fn reconfigure(
+        module_name: &str,
+        policy: Option<pgrx::Json>,
+        limits: Option<pgrx::Json>,
+    ) -> Result<bool, ErrorReport> {
+        reconfigure::reconfigure_impl(module_name, policy, limits)
+            .map_err(crate::errors::PgWasmError::into_error_report)
+    }
+
+    #[pg_extern(name = "pgwasm_unload")]
+    fn unload(module_name: &str, cascade: default!(bool, false)) -> Result<bool, ErrorReport> {
+        unload::unload_impl(module_name, cascade)
+            .map_err(crate::errors::PgWasmError::into_error_report)
+    }
+
+    #[pg_extern(name = "pgwasm_unload_all")]
+    fn unload_all() -> Result<i64, ErrorReport> {
+        unload::unload_all_impl()
+            .map(|n| n as i64)
             .map_err(crate::errors::PgWasmError::into_error_report)
     }
 }
@@ -74,19 +71,17 @@ mod sql_api {
 #[cfg(feature = "pg_test")]
 #[pg_schema]
 mod tests {
-    use pgrx::Json;
-    use pgrx::prelude::*;
-    use pgrx::spi::Spi;
+    use pgrx::{Json, prelude::*, spi::Spi};
     use serde_json::json;
 
-    use crate::catalog::modules;
-    use crate::config::{Limits, PolicyOverrides};
-    use crate::errors::PgWasmError;
-    use crate::lifecycle::unload::test_support as unload_test;
-    use crate::lifecycle::{load, reconfigure, unload};
-    use crate::policy::{self, GucSnapshot};
-    use crate::shmem;
-    use crate::trampoline;
+    use crate::{
+        catalog::modules,
+        config::{Limits, PolicyOverrides},
+        errors::PgWasmError,
+        lifecycle::{load, reconfigure, unload, unload::test_support as unload_test},
+        policy::{self, GucSnapshot},
+        shmem, trampoline,
+    };
 
     /// Avoid epoch deadline traps during guest runs that call SPI while the shared engine ticker
     /// advances the epoch (other tests in the same suite use epoch interruption heavily).
@@ -537,11 +532,12 @@ mod core_invoke_regress {
     use pgrx::prelude::*;
     use wasmtime::Val;
 
-    use crate::errors::{ErrorContext, IntoReport, PgWasmError};
-    use crate::mapping::scalars;
-    use crate::policy;
-    use crate::runtime::core as runtime_core;
-    use crate::runtime::engine;
+    use crate::{
+        errors::{ErrorContext, IntoReport, PgWasmError},
+        mapping::scalars,
+        policy,
+        runtime::{core as runtime_core, engine},
+    };
 
     #[pg_extern(name = "pgwasm_core_invoke_scalar")]
     pub fn pgwasm_core_invoke_scalar(bytes: &[u8], export: &str, i32args: Vec<i32>) -> i32 {
