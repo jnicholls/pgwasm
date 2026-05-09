@@ -143,19 +143,6 @@ impl PgWasmError {
         }
     }
 
-    /// Convert to a pgrx [`ErrorReport`] for `#[pg_extern]` `Result<_, ErrorReport>` surfaces.
-    pub(crate) fn into_error_report(self) -> Box<ErrorReport> {
-        let ctx = ErrorContext::default();
-        let sqlstate = self.sqlstate();
-        let message = self.to_string();
-        let detail = self.detail_body(&ctx);
-        let mut report = ErrorReport::new(sqlstate, message, "pgwasm").set_detail(detail);
-        if let Some(h) = self.hint_body_owned() {
-            report = report.set_hint(h);
-        }
-        Box::new(report)
-    }
-
     /// Report this error at `ERROR` and do not return.
     pub(crate) fn report(self, ctx: ErrorContext) -> ! {
         let sqlstate = self.sqlstate();

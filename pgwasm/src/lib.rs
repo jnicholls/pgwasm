@@ -30,8 +30,9 @@ pub extern "C-unwind" fn _PG_init() {
 }
 
 mod sql_api {
-    use pgrx::{pg_sys::panic::ErrorReport, prelude::*};
+    use pgrx::prelude::*;
 
+    use crate::errors::{ErrorContext, IntoReport};
     use crate::lifecycle::{load, reconfigure, unload};
 
     #[pg_extern(name = "pgwasm_load")]
@@ -39,9 +40,8 @@ mod sql_api {
         module_name: &str,
         bytes_or_path: pgrx::Json,
         options: default!(Option<pgrx::Json>, NULL),
-    ) -> Result<bool, Box<ErrorReport>> {
-        load::load_impl(module_name, bytes_or_path, options)
-            .map_err(crate::errors::PgWasmError::into_error_report)
+    ) -> bool {
+        load::load_impl(module_name, bytes_or_path, options).or_report(ErrorContext::default())
     }
 
     #[pg_extern(name = "pgwasm_reconfigure")]
@@ -49,22 +49,21 @@ mod sql_api {
         module_name: &str,
         policy: Option<pgrx::Json>,
         limits: Option<pgrx::Json>,
-    ) -> Result<bool, Box<ErrorReport>> {
+    ) -> bool {
         reconfigure::reconfigure_impl(module_name, policy, limits)
-            .map_err(crate::errors::PgWasmError::into_error_report)
+            .or_report(ErrorContext::default())
     }
 
     #[pg_extern(name = "pgwasm_unload")]
-    fn unload(module_name: &str, cascade: default!(bool, false)) -> Result<bool, Box<ErrorReport>> {
-        unload::unload_impl(module_name, cascade)
-            .map_err(crate::errors::PgWasmError::into_error_report)
+    fn unload(module_name: &str, cascade: default!(bool, false)) -> bool {
+        unload::unload_impl(module_name, cascade).or_report(ErrorContext::default())
     }
 
     #[pg_extern(name = "pgwasm_unload_all")]
-    fn unload_all() -> Result<i64, Box<ErrorReport>> {
+    fn unload_all() -> i64 {
         unload::unload_all_impl()
             .map(|n| n as i64)
-            .map_err(crate::errors::PgWasmError::into_error_report)
+            .or_report(ErrorContext::default())
     }
 }
 

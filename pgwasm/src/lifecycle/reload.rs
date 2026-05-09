@@ -28,7 +28,7 @@ use crate::abi::{self, Abi, AbiOverride};
 use crate::artifacts;
 use crate::catalog::{EXTENSION_SCHEMA, exports, modules, wit_types};
 use crate::config::{Abi as OptionsAbi, LoadOptions, PolicyOverrides};
-use crate::errors::{PgWasmError, Result};
+use crate::errors::{ErrorContext, IntoReport, PgWasmError, Result};
 use crate::guc;
 use crate::hooks;
 use crate::policy::{self, EffectivePolicy, GucSnapshot};
@@ -120,19 +120,16 @@ pub fn reload(
     module_name: &str,
     bytes_or_path: pgrx::Json,
     options: default!(Option<pgrx::Json>, NULL),
-) -> core::result::Result<bool, Box<pgrx::pg_sys::panic::ErrorReport>> {
-    reload_impl(module_name, bytes_or_path, options).map_err(PgWasmError::into_error_report)
+) -> bool {
+    reload_impl(module_name, bytes_or_path, options).or_report(ErrorContext::default())
 }
 
 /// Superuser-only regress hook: remove a module whose catalog row survived a failed `unload`
 /// (stale `fn_oid` references after `RemoveFunctionById`).
 #[pg_extern(name = "pgwasm_test_force_cleanup_stuck_module")]
-pub fn test_force_cleanup_stuck_module(
-    module_name: &str,
-    cascade: default!(bool, true),
-) -> core::result::Result<bool, Box<pgrx::pg_sys::panic::ErrorReport>> {
+pub fn test_force_cleanup_stuck_module(module_name: &str, cascade: default!(bool, true)) -> bool {
     unload::force_cleanup_orphaned_module_impl(module_name, cascade)
-        .map_err(PgWasmError::into_error_report)
+        .or_report(ErrorContext::default())
 }
 
 pub(crate) fn reload_impl(
