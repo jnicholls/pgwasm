@@ -39,7 +39,7 @@ mod sql_api {
         module_name: &str,
         bytes_or_path: pgrx::Json,
         options: default!(Option<pgrx::Json>, NULL),
-    ) -> Result<bool, ErrorReport> {
+    ) -> Result<bool, Box<ErrorReport>> {
         load::load_impl(module_name, bytes_or_path, options)
             .map_err(crate::errors::PgWasmError::into_error_report)
     }
@@ -49,19 +49,19 @@ mod sql_api {
         module_name: &str,
         policy: Option<pgrx::Json>,
         limits: Option<pgrx::Json>,
-    ) -> Result<bool, ErrorReport> {
+    ) -> Result<bool, Box<ErrorReport>> {
         reconfigure::reconfigure_impl(module_name, policy, limits)
             .map_err(crate::errors::PgWasmError::into_error_report)
     }
 
     #[pg_extern(name = "pgwasm_unload")]
-    fn unload(module_name: &str, cascade: default!(bool, false)) -> Result<bool, ErrorReport> {
+    fn unload(module_name: &str, cascade: default!(bool, false)) -> Result<bool, Box<ErrorReport>> {
         unload::unload_impl(module_name, cascade)
             .map_err(crate::errors::PgWasmError::into_error_report)
     }
 
     #[pg_extern(name = "pgwasm_unload_all")]
-    fn unload_all() -> Result<i64, ErrorReport> {
+    fn unload_all() -> Result<i64, Box<ErrorReport>> {
         unload::unload_all_impl()
             .map(|n| n as i64)
             .map_err(crate::errors::PgWasmError::into_error_report)

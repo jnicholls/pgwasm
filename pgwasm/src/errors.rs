@@ -2,9 +2,10 @@
 
 use std::io;
 
-use pgrx::pg_sys::panic::ErrorReport;
-use pgrx::prelude::PgLogLevel;
-use pgrx::prelude::PgSqlErrorCode;
+use pgrx::{
+    pg_sys::panic::ErrorReport,
+    prelude::{PgLogLevel, PgSqlErrorCode},
+};
 use thiserror::Error;
 use wasmtime::Trap;
 
@@ -143,7 +144,7 @@ impl PgWasmError {
     }
 
     /// Convert to a pgrx [`ErrorReport`] for `#[pg_extern]` `Result<_, ErrorReport>` surfaces.
-    pub(crate) fn into_error_report(self) -> ErrorReport {
+    pub(crate) fn into_error_report(self) -> Box<ErrorReport> {
         let ctx = ErrorContext::default();
         let sqlstate = self.sqlstate();
         let message = self.to_string();
@@ -152,7 +153,7 @@ impl PgWasmError {
         if let Some(h) = self.hint_body_owned() {
             report = report.set_hint(h);
         }
-        report
+        Box::new(report)
     }
 
     /// Report this error at `ERROR` and do not return.

@@ -120,7 +120,7 @@ pub fn reload(
     module_name: &str,
     bytes_or_path: pgrx::Json,
     options: default!(Option<pgrx::Json>, NULL),
-) -> core::result::Result<bool, pgrx::pg_sys::panic::ErrorReport> {
+) -> core::result::Result<bool, Box<pgrx::pg_sys::panic::ErrorReport>> {
     reload_impl(module_name, bytes_or_path, options).map_err(PgWasmError::into_error_report)
 }
 
@@ -130,7 +130,7 @@ pub fn reload(
 pub fn test_force_cleanup_stuck_module(
     module_name: &str,
     cascade: default!(bool, true),
-) -> core::result::Result<bool, pgrx::pg_sys::panic::ErrorReport> {
+) -> core::result::Result<bool, Box<pgrx::pg_sys::panic::ErrorReport>> {
     unload::force_cleanup_orphaned_module_impl(module_name, cascade)
         .map_err(PgWasmError::into_error_report)
 }
