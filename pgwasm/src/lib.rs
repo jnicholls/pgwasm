@@ -65,12 +65,6 @@ mod sql_api {
         reload::reload_impl(module_name, bytes_or_path, options).or_report(ErrorContext::default())
     }
 
-    #[pg_extern(name = "pgwasm_test_force_cleanup_stuck_module")]
-    fn test_force_cleanup_stuck_module(module_name: &str, cascade: default!(bool, true)) -> bool {
-        unload::force_cleanup_orphaned_module_impl(module_name, cascade)
-            .or_report(ErrorContext::default())
-    }
-
     #[pg_extern(name = "pgwasm_unload")]
     fn unload(module_name: &str, cascade: default!(bool, false)) -> bool {
         unload::unload_impl(module_name, cascade).or_report(ErrorContext::default())
@@ -172,17 +166,6 @@ mod views_api {
         views::stats_sql().or_report(ErrorContext::default())
     }
 
-    #[pg_extern(parallel_unsafe, stable, name = "pgwasm_test_scrub_shmem_slots")]
-    fn pgwasm_test_scrub_shmem_slots(from_id: i64, to_id: i64) -> i64 {
-        views::test_scrub_shmem_slots(from_id, to_id).or_report(ErrorContext::default())
-    }
-
-    #[pg_extern(parallel_unsafe, stable, name = "pgwasm_test_bump_export_counters")]
-    fn pgwasm_test_bump_export_counters(module_id: i64, export_index: i32, n: i64) -> i64 {
-        views::test_bump_export_counters(module_id, export_index, n)
-            .or_report(ErrorContext::default())
-    }
-
     pgrx::extension_sql!(
         r#"
 -- Observability SRF grants: reader role `pgwasm_reader` is created in pgwasm--0.1.0.sql.
@@ -224,12 +207,13 @@ TO pgwasm_reader;
             pgwasm_modules,
             pgwasm_policy_effective,
             pgwasm_stats,
-            pgwasm_test_bump_export_counters,
-            pgwasm_test_scrub_shmem_slots,
             pgwasm_wit_types,
         ],
     );
 }
+
+#[cfg(feature = "pg_test")]
+mod sql_test_hooks;
 
 #[cfg(feature = "pg_test")]
 #[pg_schema]

@@ -93,27 +93,35 @@ ORDER BY module_name;
 SELECT pgwasm.pgwasm_test_bump_export_counters(m.module_id, 0, 3) AS bumped
 FROM pgwasm.modules m
 WHERE m.name = 'views_test_mod';
-ERROR:  resource limit exceeded: shared-memory slot allocation failed for metrics regression hook: ModuleSlots (build `pgwasm` with `--features pg_test` for regress unless the extension is in `shared_preload_libraries`)
+ bumped 
+--------
+      3
+(1 row)
+
 SELECT module_name, export_name, invocations, traps, fuel_used_total, last_invocation_at, shared
 FROM pgwasm.pgwasm_stats()
 WHERE module_name = 'views_test_mod'
 ORDER BY export_name;
   module_name   | export_name | invocations | traps | fuel_used_total | last_invocation_at | shared 
 ----------------+-------------+-------------+-------+-----------------+--------------------+--------
- views_test_mod | add         |           0 |     0 |               0 |                    | f
+ views_test_mod | add         |           3 |     0 |               0 |                    | t
 (1 row)
 
 SELECT pgwasm.pgwasm_test_bump_export_counters(m.module_id, 0, 2) AS bumped_again
 FROM pgwasm.modules m
 WHERE m.name = 'views_test_mod';
-ERROR:  resource limit exceeded: shared-memory slot allocation failed for metrics regression hook: ModuleSlots (build `pgwasm` with `--features pg_test` for regress unless the extension is in `shared_preload_libraries`)
+ bumped_again 
+--------------
+            2
+(1 row)
+
 SELECT module_name, export_name, invocations, traps, fuel_used_total, last_invocation_at, shared
 FROM pgwasm.pgwasm_stats()
 WHERE module_name = 'views_test_mod'
 ORDER BY export_name;
   module_name   | export_name | invocations | traps | fuel_used_total | last_invocation_at | shared 
 ----------------+-------------+-------------+-------+-----------------+--------------------+--------
- views_test_mod | add         |           0 |     0 |               0 |                    | f
+ views_test_mod | add         |           5 |     0 |               0 |                    | t
 (1 row)
 
 -- Monotonicity: cumulative invocations increase across bumps (5 = 3 + 2).
@@ -122,7 +130,7 @@ FROM pgwasm.pgwasm_stats()
 WHERE module_name = 'views_test_mod' AND export_name = 'add';
  invocations_monotonic 
 -----------------------
- f
+ t
 (1 row)
 
 -- Reader role: catalog SELECT + SRF EXECUTE + view SELECT.

@@ -3,16 +3,19 @@
 
 use std::collections::BTreeSet;
 
-use pgrx::prelude::*;
-use pgrx::spi::{self, Spi};
+use pgrx::{
+    prelude::*,
+    spi::{self, Spi},
+};
 
-use crate::artifacts;
-use crate::catalog::{EXTENSION_SCHEMA, exports, modules, wit_types};
-use crate::errors::{PgWasmError, Result};
-use crate::hooks;
-use crate::proc_reg;
-use crate::runtime::pool;
-use crate::shmem;
+use crate::{
+    artifacts,
+    catalog::{EXTENSION_SCHEMA, exports, modules, wit_types},
+    errors::{PgWasmError, Result},
+    hooks, proc_reg,
+    runtime::pool,
+    shmem,
+};
 
 const ON_UNLOAD_WASM_NAME: &str = "on-unload";
 
@@ -117,6 +120,9 @@ pub(crate) fn unload_all_impl() -> Result<usize> {
 /// `cache lookup failed for function`. Mirrors `unload_impl` but ignores unregister/type-drop errors.
 ///
 /// Returns `Ok(true)` when a `wasm.modules` row was removed (post-commit cleanup is scheduled).
+///
+/// Only available when the extension is built with the `pg_test` feature (`pgwasm_test_force_cleanup_stuck_module`).
+#[cfg(feature = "pg_test")]
 pub(crate) fn force_cleanup_orphaned_module_impl(module_name: &str, cascade: bool) -> Result<bool> {
     require_superuser()?;
 
@@ -357,14 +363,14 @@ fn register_post_commit_cleanup(module_id_u64: u64, active_ids: BTreeSet<u64>) {
 pub(crate) mod test_support {
     //! Helpers for `#[pg_test]` in `lib.rs` (this agent cannot add `#[pg_test]` inside this file).
 
-    use pgrx::pg_sys::AsPgCStr;
-    use pgrx::prelude::*;
-    use pgrx::spi::Spi;
+    use pgrx::{pg_sys::AsPgCStr, prelude::*, spi::Spi};
     use serde_json::json;
 
-    use crate::artifacts;
-    use crate::catalog::{EXTENSION_SCHEMA, exports, modules, wit_types};
-    use crate::proc_reg::{self, Parallel, ProcSpec, Volatility};
+    use crate::{
+        artifacts,
+        catalog::{EXTENSION_SCHEMA, exports, modules, wit_types},
+        proc_reg::{self, Parallel, ProcSpec, Volatility},
+    };
 
     pub fn extension_oid() -> pg_sys::Oid {
         let oid = unsafe { pg_sys::get_extension_oid("pgwasm".as_pg_cstr(), false) };

@@ -145,7 +145,7 @@ guide):
 cargo check -p pgwasm
 
 # Regress tests: deterministic SQL goldens. pgrx installs the extension.
-cd pgwasm && cargo pgrx regress
+cd pgwasm && cargo pgrx regress --features pg_test
 
 # In-backend unit tests (`#[pg_test]`).
 cargo pgrx test -p pgwasm

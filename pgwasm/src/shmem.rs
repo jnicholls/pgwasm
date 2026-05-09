@@ -1,12 +1,11 @@
 //! Shared-memory state and generation metadata.
 
+#[cfg(any(test, feature = "pg_test"))]
+use std::sync::OnceLock;
 use std::{
     array,
     sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, Ordering},
 };
-
-#[cfg(any(test, feature = "pg_test"))]
-use std::sync::OnceLock;
 
 use pgrx::{pg_guard, pg_sys};
 
@@ -138,12 +137,14 @@ pub(crate) enum ExportCounterKind {
     Traps,
 }
 
+#[cfg(feature = "pg_test")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ShmemOverflow {
     ExportSlots,
     ModuleSlots,
 }
 
+#[cfg(feature = "pg_test")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SlotRefs {
     pub(crate) export_len: usize,
@@ -200,20 +201,6 @@ impl ModuleSlot {
         }
     }
 
-    fn claim(&self, module_id: u64, export_start: usize, export_len: usize) {
-        self.module_id.store(module_id, Ordering::Relaxed);
-        self.export_start
-            .store(export_start as u32, Ordering::Relaxed);
-        self.export_len.store(export_len as u32, Ordering::Relaxed);
-        self.invocations.store(0, Ordering::Relaxed);
-        self.traps.store(0, Ordering::Relaxed);
-        self.errors.store(0, Ordering::Relaxed);
-        self.total_ns.store(0, Ordering::Relaxed);
-        self.rejected_by_policy.store(0, Ordering::Relaxed);
-        self.oom.store(0, Ordering::Relaxed);
-        self.occupied.store(true, Ordering::Release);
-    }
-
     fn clear(&self) {
         self.occupied.store(false, Ordering::Release);
         self.module_id.store(0, Ordering::Relaxed);
@@ -236,6 +223,23 @@ impl ModuleSlot {
             ExportCounterKind::TotalNs => &self.total_ns,
             ExportCounterKind::Traps => &self.traps,
         }
+    }
+}
+
+#[cfg(feature = "pg_test")]
+impl ModuleSlot {
+    fn claim(&self, module_id: u64, export_start: usize, export_len: usize) {
+        self.module_id.store(module_id, Ordering::Relaxed);
+        self.export_start
+            .store(export_start as u32, Ordering::Relaxed);
+        self.export_len.store(export_len as u32, Ordering::Relaxed);
+        self.invocations.store(0, Ordering::Relaxed);
+        self.traps.store(0, Ordering::Relaxed);
+        self.errors.store(0, Ordering::Relaxed);
+        self.total_ns.store(0, Ordering::Relaxed);
+        self.rejected_by_policy.store(0, Ordering::Relaxed);
+        self.oom.store(0, Ordering::Relaxed);
+        self.occupied.store(true, Ordering::Release);
     }
 }
 
@@ -267,19 +271,6 @@ impl ExportSlot {
         }
     }
 
-    fn claim(&self, module_id: u64, export_index: usize) {
-        self.module_id.store(module_id, Ordering::Relaxed);
-        self.export_index
-            .store(export_index as u32, Ordering::Relaxed);
-        self.invocations.store(0, Ordering::Relaxed);
-        self.traps.store(0, Ordering::Relaxed);
-        self.errors.store(0, Ordering::Relaxed);
-        self.total_ns.store(0, Ordering::Relaxed);
-        self.rejected_by_policy.store(0, Ordering::Relaxed);
-        self.oom.store(0, Ordering::Relaxed);
-        self.occupied.store(true, Ordering::Release);
-    }
-
     fn clear(&self) {
         self.occupied.store(false, Ordering::Release);
         self.module_id.store(0, Ordering::Relaxed);
@@ -301,6 +292,22 @@ impl ExportSlot {
             ExportCounterKind::TotalNs => &self.total_ns,
             ExportCounterKind::Traps => &self.traps,
         }
+    }
+}
+
+#[cfg(feature = "pg_test")]
+impl ExportSlot {
+    fn claim(&self, module_id: u64, export_index: usize) {
+        self.module_id.store(module_id, Ordering::Relaxed);
+        self.export_index
+            .store(export_index as u32, Ordering::Relaxed);
+        self.invocations.store(0, Ordering::Relaxed);
+        self.traps.store(0, Ordering::Relaxed);
+        self.errors.store(0, Ordering::Relaxed);
+        self.total_ns.store(0, Ordering::Relaxed);
+        self.rejected_by_policy.store(0, Ordering::Relaxed);
+        self.oom.store(0, Ordering::Relaxed);
+        self.occupied.store(true, Ordering::Release);
     }
 }
 
@@ -374,6 +381,7 @@ pub(crate) fn read_export_counter(
 }
 
 /// Reserve one module slot and `n_exports` export slots under CatalogLock.
+#[cfg(feature = "pg_test")]
 pub(crate) fn allocate_slots(module_id: u64, n_exports: usize) -> Result<SlotRefs, ShmemOverflow> {
     with_catalog_lock_exclusive(|| {
         let Some(shared_state) = shared_state_ref() else {
@@ -525,6 +533,7 @@ fn find_module_slot_index(shared_state: &SharedState, module_id: u64) -> Option<
     })
 }
 
+#[cfg(feature = "pg_test")]
 fn find_free_module_slot_index(shared_state: &SharedState) -> Option<usize> {
     shared_state
         .module_slots
@@ -544,6 +553,7 @@ fn find_export_slot_index(
     })
 }
 
+#[cfg(any(test, feature = "pg_test"))]
 fn find_contiguous_free_range<F>(
     total_slots: usize,
     needed_slots: usize,

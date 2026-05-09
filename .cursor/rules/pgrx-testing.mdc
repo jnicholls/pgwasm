@@ -33,7 +33,7 @@ When adding a workspace `tests` package, mirror ParadeDB’s env pattern: set **
 
 ## Commands (cheat sheet)
 
-- **Regress (all / one file):** from `pgwasm/`, `cargo pgrx regress` or `cargo pgrx regress --auto -- <pgversion> <testname>` (see pgrx docs and existing `tests/pg_regress/` layout).
+- **Regress (all / one file):** from `pgwasm/`, `cargo pgrx regress --features pg_test` (or `cargo pgrx regress --auto -- <pgversion> <testname>` with the same feature) so `pgwasm_test_*` SQL hooks exist; see pgrx docs and `tests/pg_regress/` layout.
 - **In-Postgres unit tests:** `cargo pgrx test -p pgwasm` (filter with `--` / test name as supported by your pgrx version).
 - **Host-only unit tests:** only if they obey rule (2) above.
 - **Integration:** `cargo test -p tests` with DB running, extension installed, **`DATABASE_URL`** set.

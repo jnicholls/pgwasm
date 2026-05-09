@@ -2,8 +2,10 @@
 
 use std::collections::BTreeSet;
 
-use pgrx::prelude::*;
-use pgrx::spi::{self, Spi, SpiHeapTupleData};
+use pgrx::{
+    prelude::*,
+    spi::{self, Spi, SpiHeapTupleData},
+};
 use serde_json::Value;
 
 use crate::errors::{ErrorContext, PgWasmError, Result};
@@ -36,8 +38,7 @@ where
 }
 
 pub(crate) mod modules {
-    use pgrx::JsonB;
-    use pgrx::spi::SpiTupleTable;
+    use pgrx::{JsonB, spi::SpiTupleTable};
 
     use super::*;
 
@@ -188,6 +189,9 @@ pub(crate) mod modules {
     ///
     /// Used when nested `Spi::connect_mut` calls would otherwise leave `modules::delete` blind to
     /// uncommitted child deletes from a prior SPI snapshot.
+    ///
+    /// Only built with the `pg_test` feature (`pgwasm_test_force_cleanup_stuck_module`).
+    #[cfg(feature = "pg_test")]
     pub(crate) fn delete_module_tree_for_orphan_recovery(module_id: i64) -> Result<bool> {
         use pgrx::pg_sys;
 
@@ -280,8 +284,7 @@ pub(crate) mod modules {
 }
 
 pub(crate) mod exports {
-    use pgrx::JsonB;
-    use pgrx::spi::SpiTupleTable;
+    use pgrx::{JsonB, spi::SpiTupleTable};
 
     use super::*;
 
@@ -506,8 +509,7 @@ pub(crate) mod exports {
 }
 
 pub(crate) mod wit_types {
-    use pgrx::JsonB;
-    use pgrx::spi::SpiTupleTable;
+    use pgrx::{JsonB, spi::SpiTupleTable};
 
     use super::*;
 
@@ -838,8 +840,7 @@ pub(crate) fn init() {
 #[cfg(feature = "pg_test")]
 #[pg_schema]
 mod tests {
-    use pgrx::prelude::*;
-    use pgrx::spi::Spi;
+    use pgrx::{prelude::*, spi::Spi};
 
     use super::{CATALOG_SCHEMA, migrations::EXPECTED_TABLE_COLUMNS};
 

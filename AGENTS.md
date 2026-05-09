@@ -150,7 +150,7 @@ All five CI steps are documented in `.github/workflows/ci.yml`. In summary:
 2. `cargo clippy --workspace -- -D warnings`
 3. `cargo test --workspace` — host-only tests (52 tests); integration tests in `tests/` crate are `#[ignore]`
 4. `cargo pgrx test pg17 -p pgwasm` — 35 in-backend `#[pg_test]` tests
-5. `cargo pgrx regress pg17 --resetdb -p pgwasm` — 11 SQL golden tests
+5. `cargo pgrx regress pg17 --resetdb -p pgwasm --features pg_test` — 11 SQL golden tests (needs `pg_test` for `pgwasm_test_*` SQL hooks)
 
 ### Non-obvious caveats
 

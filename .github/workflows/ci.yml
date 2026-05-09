@@ -44,4 +44,4 @@ jobs:
         run: cargo pgrx test pg17 -p pgwasm
 
       - name: cargo pgrx regress
-        run: cargo pgrx regress pg17 --resetdb -p pgwasm
+        run: cargo pgrx regress pg17 --resetdb -p pgwasm --features pg_test
