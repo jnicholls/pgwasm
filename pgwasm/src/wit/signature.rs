@@ -176,6 +176,163 @@ pub(crate) fn parse_export_signature(value: &Value) -> Result<ExportSignature> {
     Ok(signature)
 }
 
+pub(crate) fn export_signatures_differ(old: &Value, new: &Value) -> bool {
+    if old == new {
+        return false;
+    }
+
+    let (Ok(old_sig), Ok(new_sig)) = (parse_export_signature(old), parse_export_signature(new))
+    else {
+        return true;
+    };
+
+    if old_sig.kind != new_sig.kind
+        || old_sig.version != new_sig.version
+        || old_sig.params.len() != new_sig.params.len()
+    {
+        return true;
+    }
+
+    for (old_param, new_param) in old_sig.params.iter().zip(&new_sig.params) {
+        if old_param.name != new_param.name || shapes_differ(&old_param.ty, &new_param.ty) {
+            return true;
+        }
+    }
+
+    match (&old_sig.result, &new_sig.result) {
+        (None, None) => false,
+        (Some(old_result), Some(new_result)) => shapes_differ(old_result, new_result),
+        _ => true,
+    }
+}
+
+fn shapes_differ(old: &TypeShape, new: &TypeShape) -> bool {
+    match (old, new) {
+        (TypeShape::Bool, TypeShape::Bool)
+        | (TypeShape::Char, TypeShape::Char)
+        | (TypeShape::ErrorContext, TypeShape::ErrorContext)
+        | (TypeShape::F32, TypeShape::F32)
+        | (TypeShape::F64, TypeShape::F64)
+        | (TypeShape::S8, TypeShape::S8)
+        | (TypeShape::S16, TypeShape::S16)
+        | (TypeShape::S32, TypeShape::S32)
+        | (TypeShape::S64, TypeShape::S64)
+        | (TypeShape::String, TypeShape::String)
+        | (TypeShape::U8, TypeShape::U8)
+        | (TypeShape::U16, TypeShape::U16)
+        | (TypeShape::U32, TypeShape::U32)
+        | (TypeShape::U64, TypeShape::U64) => false,
+        (TypeShape::Borrow { type_key: old_key }, TypeShape::Borrow { type_key: new_key })
+        | (
+            TypeShape::Enum {
+                type_key: old_key, ..
+            },
+            TypeShape::Enum {
+                type_key: new_key, ..
+            },
+        )
+        | (
+            TypeShape::FixedLengthList {
+                type_key: old_key, ..
+            },
+            TypeShape::FixedLengthList {
+                type_key: new_key, ..
+            },
+        )
+        | (
+            TypeShape::Flags {
+                type_key: old_key, ..
+            },
+            TypeShape::Flags {
+                type_key: new_key, ..
+            },
+        )
+        | (
+            TypeShape::Future {
+                type_key: old_key, ..
+            },
+            TypeShape::Future {
+                type_key: new_key, ..
+            },
+        )
+        | (
+            TypeShape::List {
+                type_key: old_key, ..
+            },
+            TypeShape::List {
+                type_key: new_key, ..
+            },
+        )
+        | (
+            TypeShape::Map {
+                type_key: old_key, ..
+            },
+            TypeShape::Map {
+                type_key: new_key, ..
+            },
+        )
+        | (
+            TypeShape::Option {
+                type_key: old_key, ..
+            },
+            TypeShape::Option {
+                type_key: new_key, ..
+            },
+        )
+        | (TypeShape::Own { type_key: old_key }, TypeShape::Own { type_key: new_key })
+        | (
+            TypeShape::Record {
+                type_key: old_key, ..
+            },
+            TypeShape::Record {
+                type_key: new_key, ..
+            },
+        )
+        | (TypeShape::Resource { type_key: old_key }, TypeShape::Resource { type_key: new_key })
+        | (
+            TypeShape::Result {
+                type_key: old_key, ..
+            },
+            TypeShape::Result {
+                type_key: new_key, ..
+            },
+        )
+        | (
+            TypeShape::Stream {
+                type_key: old_key, ..
+            },
+            TypeShape::Stream {
+                type_key: new_key, ..
+            },
+        )
+        | (
+            TypeShape::Tuple {
+                type_key: old_key, ..
+            },
+            TypeShape::Tuple {
+                type_key: new_key, ..
+            },
+        )
+        | (
+            TypeShape::TypeAlias {
+                type_key: old_key, ..
+            },
+            TypeShape::TypeAlias {
+                type_key: new_key, ..
+            },
+        )
+        | (
+            TypeShape::Variant {
+                type_key: old_key, ..
+            },
+            TypeShape::Variant {
+                type_key: new_key, ..
+            },
+        ) => old_key != new_key,
+        _ => true,
+    }
+}
+
 fn find_export_function<'a>(
     decoded: &'a world::DecodedWorld,
     wasm_export: &str,

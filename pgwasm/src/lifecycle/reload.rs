@@ -465,7 +465,7 @@ fn plan_reload_exports(
             continue;
         };
         let new_sig = export_signature_json(decoded, wasm_name)?;
-        if old_row.signature != new_sig && !breaking_allowed {
+        if signature::export_signatures_differ(&old_row.signature, &new_sig) && !breaking_allowed {
             return Err(BreakingChange::ExportSignatureChanged {
                 wasm_name: wasm_name.clone(),
             }
@@ -501,7 +501,7 @@ fn plan_reload_exports_core(
             continue;
         };
         let new_sig = json!({"abi": "core", "export": wasm_name});
-        if old_row.signature != new_sig && !breaking_allowed {
+        if signature::export_signatures_differ(&old_row.signature, &new_sig) && !breaking_allowed {
             return Err(BreakingChange::ExportSignatureChanged {
                 wasm_name: wasm_name.clone(),
             }
@@ -559,7 +559,7 @@ fn apply_export_changes(
     for (spec, wasm_name) in new_specs {
         if let Some(old_row) = old_by_wasm.get(wasm_name) {
             let new_sig = export_signature_json(decoded, wasm_name)?;
-            let sig_changed = old_row.signature != new_sig;
+            let sig_changed = signature::export_signatures_differ(&old_row.signature, &new_sig);
             let shape_changed =
                 old_row.arg_types != spec.arg_types || old_row.ret_type != norm_ret(spec.ret_type);
             if sig_changed || shape_changed {
@@ -598,7 +598,7 @@ fn apply_export_changes(
             // `old_by_wasm` can miss rows when SPI snapshots diverge (e.g. internal subtransactions);
             // never insert a second `(module_id, wasm_name)` row.
             let new_sig = export_signature_json(decoded, wasm_name)?;
-            let sig_changed = existing.signature != new_sig;
+            let sig_changed = signature::export_signatures_differ(&existing.signature, &new_sig);
             let shape_changed = existing.arg_types != spec.arg_types
                 || existing.ret_type != norm_ret(spec.ret_type);
             if sig_changed || shape_changed {
@@ -687,7 +687,8 @@ fn apply_export_changes_core(
         if let Some(old_row) = old_by_wasm.get(wasm_name) {
             let shape_changed =
                 old_row.arg_types != spec.arg_types || old_row.ret_type != norm_ret(spec.ret_type);
-            if old_row.signature != signature || shape_changed {
+            if signature::export_signatures_differ(&old_row.signature, &signature) || shape_changed
+            {
                 let Some(old_oid) = old_row.fn_oid else {
                     return Err(PgWasmError::Internal(
                         "export row missing fn_oid".to_string(),
@@ -722,7 +723,8 @@ fn apply_export_changes_core(
         } else if let Some(existing) = exports::get_by_module_and_wasm_name(module_id, wasm_name)? {
             let shape_changed = existing.arg_types != spec.arg_types
                 || existing.ret_type != norm_ret(spec.ret_type);
-            if existing.signature != signature || shape_changed {
+            if signature::export_signatures_differ(&existing.signature, &signature) || shape_changed
+            {
                 let Some(old_oid) = existing.fn_oid else {
                     return Err(PgWasmError::Internal(
                         "export row missing fn_oid".to_string(),
