@@ -1434,9 +1434,6 @@ fn wit_wasm_type_to_pg_oid(
             })?;
             Ok(row.pg_type_oid)
         }
-        other => Err(PgWasmError::Unsupported(format!(
-            "WIT type `{other:?}` is not supported for automatic SQL export registration in this build"
-        ))),
     }
 }
 
