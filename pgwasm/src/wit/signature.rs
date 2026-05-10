@@ -375,12 +375,9 @@ fn shape_for_type_id(
 
 #[cfg(all(test, not(feature = "pg_test")))]
 mod host_tests {
-    use wit_component::{ComponentEncoder, StringEncoding, embed_component_metadata};
-
     use super::*;
 
-    fn fixture_component_bytes(wit_source: &str, world_name: &str) -> Vec<u8> {
-        let mut module = vec![0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00];
+    fn fixture_decoded_world(wit_source: &str, world_name: &str) -> world::DecodedWorld {
         let mut resolve = wit_parser::Resolve::default();
         let pkg = resolve
             .push_str("fixture.wit", wit_source)
@@ -388,20 +385,16 @@ mod host_tests {
         let world_id = resolve
             .select_world(&[pkg], Some(world_name))
             .expect("fixture world should exist");
-        embed_component_metadata(&mut module, &resolve, world_id, StringEncoding::UTF8)
-            .expect("fixture metadata should embed");
-
-        ComponentEncoder::default()
-            .module(&module)
-            .expect("fixture module should encode")
-            .validate(true)
-            .encode()
-            .expect("component bytes should build")
+        world::DecodedWorld {
+            resolve,
+            world_id,
+            wit_text: wit_source.to_string(),
+        }
     }
 
     #[test]
     fn export_signature_is_normalized_and_round_trips_json() {
-        let bytes = fixture_component_bytes(
+        let decoded = fixture_decoded_world(
             r#"
                 package test:fixture;
 
@@ -425,7 +418,6 @@ mod host_tests {
             "#,
             "fixture",
         );
-        let decoded = world::decode(&bytes).expect("fixture should decode");
 
         let value = export_signature_json(&decoded, "echo").expect("signature should serialize");
         let parsed = parse_export_signature(&value).expect("signature should parse");
