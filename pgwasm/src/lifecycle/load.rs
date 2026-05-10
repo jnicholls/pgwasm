@@ -1,37 +1,37 @@
 //! Load lifecycle: authz, bytes, validate/classify, WIT + policy, compile/persist, catalog + `pg_proc`,
 //! generation bump, and transaction abort cleanup for on-disk artifacts.
 
-use std::collections::HashMap;
-use std::fs;
-use std::io::{self, ErrorKind};
-use std::path::{Component, Path, PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    io::{self, ErrorKind},
+    path::{Component, Path, PathBuf},
+};
 
-use pgrx::prelude::*;
-use pgrx::spi::{self, Spi};
-use pgrx::{PgSubXactCallbackEvent, register_subxact_callback};
+use pgrx::{
+    PgSubXactCallbackEvent,
+    prelude::*,
+    register_subxact_callback,
+    spi::{self, Spi},
+};
 use serde_json::{Value, json};
 use wasmparser::{CompositeInnerType, ExternalKind, Parser, Payload, ValType};
 use wit_parser::{Function, FunctionKind, Type, WorldItem, WorldKey};
 
-use crate::abi::{self, Abi, AbiOverride};
-use crate::artifacts;
-use crate::catalog::{EXTENSION_SCHEMA, exports, modules, wit_types};
-use crate::config::{Abi as OptionsAbi, LoadOptions, PolicyOverrides};
-use crate::errors::{PgWasmError, Result};
-use crate::guc;
-use crate::hooks;
-use crate::policy::{self, EffectivePolicy, GucSnapshot};
-use crate::proc_reg::{self, Parallel, ProcSpec, Volatility};
-use crate::runtime::component;
-use crate::runtime::core as runtime_core;
-use crate::runtime::engine;
-use crate::runtime::pool;
-use crate::shmem;
-use crate::wit::typing;
-use crate::wit::udt;
-use crate::wit::world;
-
 use super::reload;
+use crate::{
+    abi::{self, Abi, AbiOverride},
+    artifacts,
+    catalog::{EXTENSION_SCHEMA, exports, modules, wit_types},
+    config::{Abi as OptionsAbi, LoadOptions, PolicyOverrides},
+    errors::{PgWasmError, Result},
+    guc, hooks,
+    policy::{self, EffectivePolicy, GucSnapshot},
+    proc_reg::{self, Parallel, ProcSpec, Volatility},
+    runtime::{component, core as runtime_core, engine, pool},
+    shmem,
+    wit::{signature, typing, udt, world},
+};
 
 const ON_LOAD_WASM_NAME: &str = "on-load";
 
@@ -774,58 +774,7 @@ fn type_name_for_id(resolve: &wit_parser::Resolve, type_id: wit_parser::TypeId) 
 }
 
 fn export_signature_json(decoded: &world::DecodedWorld, wasm_export: &str) -> Result<Value> {
-    let world = decoded
-        .resolve
-        .worlds
-        .get(decoded.world_id)
-        .ok_or_else(|| PgWasmError::InvalidModule("decoded world missing".to_string()))?;
-
-    let mut func: Option<&Function> = None;
-    for item in world.exports.values() {
-        match item {
-            WorldItem::Function(f) => {
-                let w = export_wasm_name(&decoded.resolve, f);
-                if w == wasm_export {
-                    func = Some(f);
-                    break;
-                }
-            }
-            WorldItem::Interface { id, .. } => {
-                let Some(iface) = decoded.resolve.interfaces.get(*id) else {
-                    continue;
-                };
-                for f in iface.functions.values() {
-                    let w = export_wasm_name(&decoded.resolve, f);
-                    if w == wasm_export {
-                        func = Some(f);
-                        break;
-                    }
-                }
-            }
-            WorldItem::Type { .. } => {}
-        }
-        if func.is_some() {
-            break;
-        }
-    }
-
-    let func = func.ok_or_else(|| {
-        PgWasmError::Internal(format!(
-            "could not locate WIT function `{wasm_export}` for signature JSON"
-        ))
-    })?;
-
-    let params: Vec<Value> = func
-        .params
-        .iter()
-        .map(|p| json!({"name": p.name, "type": format!("{:?}", p.ty)}))
-        .collect();
-    let result = func.result.map(|t| json!({"type": format!("{t:?}")}));
-    Ok(json!({
-        "kind": "wit-function",
-        "params": params,
-        "result": result,
-    }))
+    signature::export_signature_json(decoded, wasm_export)
 }
 
 fn plan_export_proc_specs(
@@ -931,9 +880,15 @@ fn wit_wasm_type_to_pg_oid(
 ) -> Result<pg_sys::Oid> {
     match ty {
         Type::Bool => Ok(pg_sys::BOOLOID),
-        Type::S32 => Ok(pg_sys::INT4OID),
-        Type::S64 => Ok(pg_sys::INT8OID),
+        Type::Char => Ok(pg_sys::TEXTOID),
+        Type::ErrorContext => Ok(pg_sys::TEXTOID),
+        Type::F32 => Ok(pg_sys::FLOAT4OID),
+        Type::F64 => Ok(pg_sys::FLOAT8OID),
+        Type::S8 | Type::S16 | Type::U8 => Ok(pg_sys::INT2OID),
+        Type::S32 | Type::U16 => Ok(pg_sys::INT4OID),
+        Type::U32 | Type::S64 => Ok(pg_sys::INT8OID),
         Type::String => Ok(pg_sys::TEXTOID),
+        Type::U64 => Ok(pg_sys::NUMERICOID),
         Type::Id(type_id) => {
             let key = typing::export_type_key_for_id(resolve, *type_id)?;
             let row = wit_types::get_by_module_and_type_key(module_id, &key)?.ok_or_else(|| {

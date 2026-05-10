@@ -4,29 +4,33 @@
 //! record/variant/tuple marshaling returns [`PgWasmError::Unsupported`] until UDT registration
 //! supplies OIDs.
 
-use std::collections::HashMap;
 #[cfg(feature = "pg_test")]
 use std::ffi::CStr;
-use std::num::NonZeroUsize;
+use std::{collections::HashMap, num::NonZeroUsize};
 
-use pgrx::WhoAllocated;
-use pgrx::heap_tuple::PgHeapTuple;
-use pgrx::pg_sys;
-use pgrx::prelude::*;
-use pgrx::tupdesc::PgTupleDesc;
-use wasmtime::Store;
-use wasmtime::component::{Func, Val};
-
-use crate::errors::{PgWasmError, map_wasmtime_err};
-use crate::wit::typing::{CompositeField, PgType, TypePlan};
+use pgrx::{
+    AnyNumeric, WhoAllocated, heap_tuple::PgHeapTuple, pg_sys, prelude::*, tupdesc::PgTupleDesc,
+};
+use wasmtime::{
+    Store,
+    component::{Func, Val},
+};
 
 use super::list;
+use crate::{
+    errors::{PgWasmError, map_wasmtime_err},
+    wit::{
+        signature::{ExportSignature, TypeShape},
+        typing::{CompositeField, PgType, TypePlan},
+    },
+};
 
 /// One parameter or result slot: WIT `option<T>` maps to the same PostgreSQL type as `T` with
 /// SQL NULL representing `none`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ExportSlot {
     pub(crate) is_option: bool,
+    pub(crate) pg_oid: pg_sys::Oid,
     pub(crate) pg_type: PgType,
 }
 
@@ -40,10 +44,18 @@ pub(crate) struct Export {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ScalarKind {
     Bool,
-    Int2,
-    Int4,
-    Int8,
-    Text,
+    Char,
+    F32,
+    F64,
+    S16,
+    S32,
+    S64,
+    S8,
+    String,
+    U16,
+    U32,
+    U64,
+    U8,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -104,7 +116,7 @@ pub(crate) fn plan_marshaler(
 ) -> Result<Vec<MarshalPlan>, PgWasmError> {
     let mut out = Vec::with_capacity(export.params.len() + export.result.as_ref().map_or(0, |_| 1));
     for p in &export.params {
-        let inner = pg_type_to_marshal_plan(&p.pg_type, pg_sys::InvalidOid)?;
+        let inner = pg_type_to_marshal_plan(&p.pg_type, p.pg_oid)?;
         out.push(if p.is_option {
             MarshalPlan::Option(Box::new(inner))
         } else {
@@ -112,7 +124,7 @@ pub(crate) fn plan_marshaler(
         });
     }
     if let Some(r) = &export.result {
-        let inner = pg_type_to_marshal_plan(&r.pg_type, pg_sys::InvalidOid)?;
+        let inner = pg_type_to_marshal_plan(&r.pg_type, r.pg_oid)?;
         out.push(if r.is_option {
             MarshalPlan::Option(Box::new(inner))
         } else {
@@ -122,6 +134,115 @@ pub(crate) fn plan_marshaler(
     Ok(out)
 }
 
+pub(crate) fn plan_marshaler_from_signature<F>(
+    signature: &ExportSignature,
+    mut type_oid: F,
+) -> Result<Vec<MarshalPlan>, PgWasmError>
+where
+    F: FnMut(&str) -> Result<pg_sys::Oid, PgWasmError>,
+{
+    let mut out =
+        Vec::with_capacity(signature.params.len() + signature.result.as_ref().map_or(0, |_| 1));
+    for param in &signature.params {
+        out.push(type_shape_to_marshal_plan(&param.ty, &mut type_oid)?);
+    }
+    if let Some(result) = &signature.result {
+        out.push(type_shape_to_marshal_plan(result, &mut type_oid)?);
+    }
+    Ok(out)
+}
+
+fn type_shape_to_marshal_plan<F>(
+    shape: &TypeShape,
+    type_oid: &mut F,
+) -> Result<MarshalPlan, PgWasmError>
+where
+    F: FnMut(&str) -> Result<pg_sys::Oid, PgWasmError>,
+{
+    Ok(match shape {
+        TypeShape::Bool => MarshalPlan::Scalar(ScalarKind::Bool),
+        TypeShape::Char => MarshalPlan::Scalar(ScalarKind::Char),
+        TypeShape::F32 => MarshalPlan::Scalar(ScalarKind::F32),
+        TypeShape::F64 => MarshalPlan::Scalar(ScalarKind::F64),
+        TypeShape::S8 => MarshalPlan::Scalar(ScalarKind::S8),
+        TypeShape::S16 => MarshalPlan::Scalar(ScalarKind::S16),
+        TypeShape::S32 => MarshalPlan::Scalar(ScalarKind::S32),
+        TypeShape::S64 => MarshalPlan::Scalar(ScalarKind::S64),
+        TypeShape::String => MarshalPlan::Scalar(ScalarKind::String),
+        TypeShape::U8 => MarshalPlan::Scalar(ScalarKind::U8),
+        TypeShape::U16 => MarshalPlan::Scalar(ScalarKind::U16),
+        TypeShape::U32 => MarshalPlan::Scalar(ScalarKind::U32),
+        TypeShape::U64 => MarshalPlan::Scalar(ScalarKind::U64),
+        TypeShape::Borrow { .. } | TypeShape::Own { .. } | TypeShape::Resource { .. } => {
+            MarshalPlan::Scalar(ScalarKind::S64)
+        }
+        TypeShape::Enum { cases, .. } => MarshalPlan::Enum(cases.clone()),
+        TypeShape::Flags { names, .. } => MarshalPlan::Flags {
+            names: names.clone(),
+        },
+        TypeShape::List { element, .. } if matches!(element.as_ref(), TypeShape::U8) => {
+            MarshalPlan::ListU8
+        }
+        TypeShape::List { element, .. } => {
+            MarshalPlan::List(Box::new(type_shape_to_marshal_plan(element, type_oid)?))
+        }
+        TypeShape::Option { inner, .. } => {
+            MarshalPlan::Option(Box::new(type_shape_to_marshal_plan(inner, type_oid)?))
+        }
+        TypeShape::Record { fields, type_key } => MarshalPlan::Record {
+            fields: fields
+                .iter()
+                .map(|field| {
+                    Ok::<FieldPlan, PgWasmError>(FieldPlan {
+                        name: field.name.clone(),
+                        plan: Box::new(type_shape_to_marshal_plan(&field.ty, type_oid)?),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            pg_oid: type_oid(type_key)?,
+        },
+        TypeShape::Tuple { elements, type_key } => MarshalPlan::Tuple {
+            elements: elements
+                .iter()
+                .map(|element| type_shape_to_marshal_plan(element, type_oid))
+                .collect::<Result<Vec<_>, _>>()?,
+            pg_oid: type_oid(type_key)?,
+        },
+        TypeShape::TypeAlias { inner, .. } => type_shape_to_marshal_plan(inner, type_oid)?,
+        TypeShape::Variant { cases, type_key } => MarshalPlan::Variant {
+            cases: cases
+                .iter()
+                .map(|case| {
+                    Ok::<CasePlan, PgWasmError>(CasePlan {
+                        name: case.name.clone(),
+                        payload: case
+                            .payload
+                            .as_ref()
+                            .map(|payload| type_shape_to_marshal_plan(payload, type_oid))
+                            .transpose()?
+                            .map(Box::new),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            pg_oid: type_oid(type_key)?,
+        },
+        TypeShape::ErrorContext => {
+            return Err(PgWasmError::Unsupported(
+                "WIT error-context values cannot be marshaled as SQL text yet".to_string(),
+            ));
+        }
+        TypeShape::FixedLengthList { .. }
+        | TypeShape::Future { .. }
+        | TypeShape::Map { .. }
+        | TypeShape::Result { .. }
+        | TypeShape::Stream { .. } => {
+            return Err(PgWasmError::Unsupported(format!(
+                "WIT shape `{shape:?}` is not supported for dynamic marshaling in this build"
+            )));
+        }
+    })
+}
+
 fn pg_type_to_marshal_plan(
     pg: &PgType,
     composite_oid: pg_sys::Oid,
@@ -129,10 +250,12 @@ fn pg_type_to_marshal_plan(
     Ok(match pg {
         PgType::Scalar(name) => match *name {
             "boolean" => MarshalPlan::Scalar(ScalarKind::Bool),
-            "int2" => MarshalPlan::Scalar(ScalarKind::Int2),
-            "int4" => MarshalPlan::Scalar(ScalarKind::Int4),
-            "int8" => MarshalPlan::Scalar(ScalarKind::Int8),
-            "text" => MarshalPlan::Scalar(ScalarKind::Text),
+            "double precision" => MarshalPlan::Scalar(ScalarKind::F64),
+            "int2" => MarshalPlan::Scalar(ScalarKind::S16),
+            "int4" => MarshalPlan::Scalar(ScalarKind::S32),
+            "int8" => MarshalPlan::Scalar(ScalarKind::S64),
+            "real" => MarshalPlan::Scalar(ScalarKind::F32),
+            "text" => MarshalPlan::Scalar(ScalarKind::String),
             "bytea" => MarshalPlan::ListU8,
             other => {
                 return Err(PgWasmError::Unsupported(format!(
@@ -142,9 +265,9 @@ fn pg_type_to_marshal_plan(
         },
         PgType::Array(inner) => {
             if matches!(inner.as_ref(), PgType::Scalar(s) if *s == "int4") {
-                MarshalPlan::List(Box::new(MarshalPlan::Scalar(ScalarKind::Int4)))
+                MarshalPlan::List(Box::new(MarshalPlan::Scalar(ScalarKind::S32)))
             } else if matches!(inner.as_ref(), PgType::Scalar(s) if *s == "int8") {
-                MarshalPlan::List(Box::new(MarshalPlan::Scalar(ScalarKind::Int8)))
+                MarshalPlan::List(Box::new(MarshalPlan::Scalar(ScalarKind::S64)))
             } else {
                 return Err(PgWasmError::Unsupported(
                     "only list<int4>, list<int8>, and list<u8>/bytea are supported for list marshaling"
@@ -199,7 +322,11 @@ fn pg_type_to_marshal_plan(
         } if *base == "int4" => MarshalPlan::Flags {
             names: names.clone(),
         },
-        PgType::Domain { base, .. } if *base == "int4" => MarshalPlan::Scalar(ScalarKind::Int4),
+        PgType::Domain { base, .. } if *base == "int2" => MarshalPlan::Scalar(ScalarKind::S16),
+        PgType::Domain { base, .. } if *base == "int4" => MarshalPlan::Scalar(ScalarKind::S32),
+        PgType::Domain { base, .. } if *base == "int8" => MarshalPlan::Scalar(ScalarKind::S64),
+        PgType::Domain { base, .. } if *base == "numeric" => MarshalPlan::Scalar(ScalarKind::U64),
+        PgType::Domain { base, .. } if *base == "text" => MarshalPlan::Scalar(ScalarKind::Char),
         PgType::Domain { .. } => {
             return Err(PgWasmError::Unsupported(
                 "domain types (other than flags/int4) are not supported for dynamic marshaling"
@@ -226,19 +353,23 @@ pub(crate) fn datum_to_val(
         }
         MarshalPlan::ListU8 => {
             if is_null {
-                return Ok(Val::List(Vec::new()));
+                return Err(PgWasmError::ValidationFailed(
+                    "SQL NULL is not valid for non-option list<u8>".to_string(),
+                ));
             }
             list::bytea_datum_to_u8_list(datum, false)
         }
         MarshalPlan::List(inner) => {
             if is_null {
-                return Ok(Val::List(Vec::new()));
+                return Err(PgWasmError::ValidationFailed(
+                    "SQL NULL is not valid for non-option list".to_string(),
+                ));
             }
-            if matches!(inner.as_ref(), MarshalPlan::Scalar(ScalarKind::Int4)) {
+            if matches!(inner.as_ref(), MarshalPlan::Scalar(ScalarKind::S32)) {
                 return list::array_datum_to_list_i32(datum, false, |v| Ok(Val::S32(v)));
             }
-            if matches!(inner.as_ref(), MarshalPlan::Scalar(ScalarKind::Int8)) {
-                return list::array_datum_to_list_i32(datum, false, |v| Ok(Val::S64(i64::from(v))));
+            if matches!(inner.as_ref(), MarshalPlan::Scalar(ScalarKind::S64)) {
+                return list::array_datum_to_list_i64(datum, false, |v| Ok(Val::S64(v)));
             }
             Err(PgWasmError::Unsupported(
                 "list element type is not supported for this marshaling plan".to_string(),
@@ -276,36 +407,111 @@ fn read_optional_field_val<A: WhoAllocated>(
     plan: &MarshalPlan,
     attno: NonZeroUsize,
 ) -> Result<Option<Val>, PgWasmError> {
+    read_scalar_attr(tup, plan, attno, "")
+}
+
+fn read_scalar_attr<A: WhoAllocated>(
+    tup: &PgHeapTuple<'_, A>,
+    plan: &MarshalPlan,
+    attno: NonZeroUsize,
+    context: &str,
+) -> Result<Option<Val>, PgWasmError> {
+    let ctx = |error| {
+        if context.is_empty() {
+            PgWasmError::Internal(format!("{error}"))
+        } else {
+            PgWasmError::Internal(format!("{context}: {error}"))
+        }
+    };
     match plan {
-        MarshalPlan::Scalar(ScalarKind::Bool) => {
-            let v: Option<bool> = tup
-                .get_by_index(attno)
-                .map_err(|e| PgWasmError::Internal(format!("{e}")))?;
-            Ok(v.map(Val::Bool))
+        MarshalPlan::Scalar(ScalarKind::Bool) => Ok(tup
+            .get_by_index::<bool>(attno)
+            .map_err(&ctx)?
+            .map(Val::Bool)),
+        MarshalPlan::Scalar(ScalarKind::Char) => {
+            let value = tup.get_by_index::<String>(attno).map_err(&ctx)?;
+            value.map(|s| string_to_char_val(&s)).transpose()
         }
-        MarshalPlan::Scalar(ScalarKind::Int2) => {
-            let v: Option<i16> = tup
-                .get_by_index(attno)
-                .map_err(|e| PgWasmError::Internal(format!("{e}")))?;
-            Ok(v.map(Val::S16))
+        MarshalPlan::Scalar(ScalarKind::F32) => Ok(tup
+            .get_by_index::<f32>(attno)
+            .map_err(&ctx)?
+            .map(Val::Float32)),
+        MarshalPlan::Scalar(ScalarKind::F64) => Ok(tup
+            .get_by_index::<f64>(attno)
+            .map_err(&ctx)?
+            .map(Val::Float64)),
+        MarshalPlan::Scalar(ScalarKind::S8) => {
+            let value = tup.get_by_index::<i16>(attno).map_err(&ctx)?;
+            value
+                .map(|v| {
+                    i8::try_from(v).map(Val::S8).map_err(|_| {
+                        PgWasmError::ValidationFailed(format!(
+                            "int2 value {v} is out of range for WIT s8"
+                        ))
+                    })
+                })
+                .transpose()
         }
-        MarshalPlan::Scalar(ScalarKind::Int4) => {
-            let v: Option<i32> = tup
-                .get_by_index(attno)
-                .map_err(|e| PgWasmError::Internal(format!("{e}")))?;
-            Ok(v.map(Val::S32))
+        MarshalPlan::Scalar(ScalarKind::S16) => {
+            Ok(tup.get_by_index::<i16>(attno).map_err(&ctx)?.map(Val::S16))
         }
-        MarshalPlan::Scalar(ScalarKind::Int8) => {
-            let v: Option<i64> = tup
-                .get_by_index(attno)
-                .map_err(|e| PgWasmError::Internal(format!("{e}")))?;
-            Ok(v.map(Val::S64))
+        MarshalPlan::Scalar(ScalarKind::S32) => {
+            Ok(tup.get_by_index::<i32>(attno).map_err(&ctx)?.map(Val::S32))
         }
-        MarshalPlan::Scalar(ScalarKind::Text) => {
-            let v: Option<String> = tup
-                .get_by_index(attno)
-                .map_err(|e| PgWasmError::Internal(format!("{e}")))?;
-            Ok(v.map(Val::String))
+        MarshalPlan::Scalar(ScalarKind::S64) => {
+            Ok(tup.get_by_index::<i64>(attno).map_err(&ctx)?.map(Val::S64))
+        }
+        MarshalPlan::Scalar(ScalarKind::String) => Ok(tup
+            .get_by_index::<String>(attno)
+            .map_err(&ctx)?
+            .map(Val::String)),
+        MarshalPlan::Scalar(ScalarKind::U8) => {
+            let value = tup.get_by_index::<i16>(attno).map_err(&ctx)?;
+            value
+                .map(|v| {
+                    u8::try_from(v).map(Val::U8).map_err(|_| {
+                        PgWasmError::ValidationFailed(format!(
+                            "int2 value {v} is out of range for WIT u8"
+                        ))
+                    })
+                })
+                .transpose()
+        }
+        MarshalPlan::Scalar(ScalarKind::U16) => {
+            let value = tup.get_by_index::<i32>(attno).map_err(&ctx)?;
+            value
+                .map(|v| {
+                    u16::try_from(v).map(Val::U16).map_err(|_| {
+                        PgWasmError::ValidationFailed(format!(
+                            "int4 value {v} is out of range for WIT u16"
+                        ))
+                    })
+                })
+                .transpose()
+        }
+        MarshalPlan::Scalar(ScalarKind::U32) => {
+            let value = tup.get_by_index::<i64>(attno).map_err(&ctx)?;
+            value
+                .map(|v| {
+                    u32::try_from(v).map(Val::U32).map_err(|_| {
+                        PgWasmError::ValidationFailed(format!(
+                            "int8 value {v} is out of range for WIT u32"
+                        ))
+                    })
+                })
+                .transpose()
+        }
+        MarshalPlan::Scalar(ScalarKind::U64) => {
+            let value = tup.get_by_index::<AnyNumeric>(attno).map_err(&ctx)?;
+            value
+                .map(|v| {
+                    u64::try_from(v).map(Val::U64).map_err(|error| {
+                        PgWasmError::ValidationFailed(format!(
+                            "numeric value is out of range for WIT u64: {error}"
+                        ))
+                    })
+                })
+                .transpose()
         }
         _ => Err(PgWasmError::Unsupported(
             "variant payload read supports only scalar types in this build".to_string(),
@@ -327,41 +533,7 @@ fn read_field_as_val<A: WhoAllocated>(
     plan: &MarshalPlan,
     attno: NonZeroUsize,
 ) -> Result<Option<Val>, PgWasmError> {
-    match plan {
-        MarshalPlan::Scalar(ScalarKind::Bool) => {
-            let v: Option<bool> = tup
-                .get_by_index(attno)
-                .map_err(|e| PgWasmError::Internal(format!("result field read: {e}")))?;
-            Ok(v.map(Val::Bool))
-        }
-        MarshalPlan::Scalar(ScalarKind::Int2) => {
-            let v: Option<i16> = tup
-                .get_by_index(attno)
-                .map_err(|e| PgWasmError::Internal(format!("result field read: {e}")))?;
-            Ok(v.map(Val::S16))
-        }
-        MarshalPlan::Scalar(ScalarKind::Int4) => {
-            let v: Option<i32> = tup
-                .get_by_index(attno)
-                .map_err(|e| PgWasmError::Internal(format!("result field read: {e}")))?;
-            Ok(v.map(Val::S32))
-        }
-        MarshalPlan::Scalar(ScalarKind::Int8) => {
-            let v: Option<i64> = tup
-                .get_by_index(attno)
-                .map_err(|e| PgWasmError::Internal(format!("result field read: {e}")))?;
-            Ok(v.map(Val::S64))
-        }
-        MarshalPlan::Scalar(ScalarKind::Text) => {
-            let v: Option<String> = tup
-                .get_by_index(attno)
-                .map_err(|e| PgWasmError::Internal(format!("result field read: {e}")))?;
-            Ok(v.map(Val::String))
-        }
-        _ => Err(PgWasmError::Unsupported(
-            "result field read supports only scalar ok/err types in this build".to_string(),
-        )),
-    }
+    read_scalar_attr(tup, plan, attno, "result field read")
 }
 
 #[cfg(feature = "pg_test")]
@@ -390,36 +562,7 @@ fn datum_to_val_non_null(
     _oid: pg_sys::Oid,
 ) -> Result<Val, PgWasmError> {
     match plan {
-        MarshalPlan::Scalar(ScalarKind::Bool) => {
-            let v = unsafe { bool::from_datum(datum, false) }.ok_or_else(|| {
-                PgWasmError::Internal("marshaling: boolean datum could not be read".to_string())
-            })?;
-            Ok(Val::Bool(v))
-        }
-        MarshalPlan::Scalar(ScalarKind::Int2) => {
-            let v = unsafe { i16::from_datum(datum, false) }.ok_or_else(|| {
-                PgWasmError::Internal("marshaling: int2 datum could not be read".to_string())
-            })?;
-            Ok(Val::S16(v))
-        }
-        MarshalPlan::Scalar(ScalarKind::Int4) => {
-            let v = unsafe { i32::from_datum(datum, false) }.ok_or_else(|| {
-                PgWasmError::Internal("marshaling: int4 datum could not be read".to_string())
-            })?;
-            Ok(Val::S32(v))
-        }
-        MarshalPlan::Scalar(ScalarKind::Int8) => {
-            let v = unsafe { i64::from_datum(datum, false) }.ok_or_else(|| {
-                PgWasmError::Internal("marshaling: int8 datum could not be read".to_string())
-            })?;
-            Ok(Val::S64(v))
-        }
-        MarshalPlan::Scalar(ScalarKind::Text) => {
-            let v = unsafe { String::from_datum(datum, false) }.ok_or_else(|| {
-                PgWasmError::Internal("marshaling: text datum could not be read".to_string())
-            })?;
-            Ok(Val::String(v))
-        }
+        MarshalPlan::Scalar(kind) => scalar_datum_to_val(kind, datum),
         MarshalPlan::Enum(names) => {
             let label = unsafe { String::from_datum(datum, false) }.ok_or_else(|| {
                 PgWasmError::Internal("marshaling: enum label (text) could not be read".to_string())
@@ -515,6 +658,178 @@ fn datum_to_val_non_null(
     }
 }
 
+fn scalar_datum_to_val(kind: &ScalarKind, datum: pg_sys::Datum) -> Result<Val, PgWasmError> {
+    Ok(match kind {
+        ScalarKind::Bool => {
+            let v = unsafe { bool::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: boolean datum could not be read".to_string())
+            })?;
+            Val::Bool(v)
+        }
+        ScalarKind::Char => {
+            let s = unsafe { String::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: char text datum could not be read".to_string())
+            })?;
+            string_to_char_val(&s)?
+        }
+        ScalarKind::F32 => {
+            let v = unsafe { f32::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: real datum could not be read".to_string())
+            })?;
+            Val::Float32(v)
+        }
+        ScalarKind::F64 => {
+            let v = unsafe { f64::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal(
+                    "marshaling: double precision datum could not be read".to_string(),
+                )
+            })?;
+            Val::Float64(v)
+        }
+        ScalarKind::S8 => {
+            let v = unsafe { i16::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: int2 datum could not be read".to_string())
+            })?;
+            Val::S8(i8::try_from(v).map_err(|_| {
+                PgWasmError::ValidationFailed(format!("int2 value {v} is out of range for WIT s8"))
+            })?)
+        }
+        ScalarKind::S16 => {
+            let v = unsafe { i16::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: int2 datum could not be read".to_string())
+            })?;
+            Val::S16(v)
+        }
+        ScalarKind::S32 => {
+            let v = unsafe { i32::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: int4 datum could not be read".to_string())
+            })?;
+            Val::S32(v)
+        }
+        ScalarKind::S64 => {
+            let v = unsafe { i64::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: int8 datum could not be read".to_string())
+            })?;
+            Val::S64(v)
+        }
+        ScalarKind::String => {
+            let v = unsafe { String::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: text datum could not be read".to_string())
+            })?;
+            Val::String(v)
+        }
+        ScalarKind::U8 => {
+            let v = unsafe { i16::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: int2 datum could not be read".to_string())
+            })?;
+            Val::U8(u8::try_from(v).map_err(|_| {
+                PgWasmError::ValidationFailed(format!("int2 value {v} is out of range for WIT u8"))
+            })?)
+        }
+        ScalarKind::U16 => {
+            let v = unsafe { i32::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: int4 datum could not be read".to_string())
+            })?;
+            Val::U16(u16::try_from(v).map_err(|_| {
+                PgWasmError::ValidationFailed(format!("int4 value {v} is out of range for WIT u16"))
+            })?)
+        }
+        ScalarKind::U32 => {
+            let v = unsafe { i64::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: int8 datum could not be read".to_string())
+            })?;
+            Val::U32(u32::try_from(v).map_err(|_| {
+                PgWasmError::ValidationFailed(format!("int8 value {v} is out of range for WIT u32"))
+            })?)
+        }
+        ScalarKind::U64 => {
+            let v = unsafe { AnyNumeric::from_datum(datum, false) }.ok_or_else(|| {
+                PgWasmError::Internal("marshaling: numeric datum could not be read".to_string())
+            })?;
+            Val::U64(u64::try_from(v).map_err(|error| {
+                PgWasmError::ValidationFailed(format!(
+                    "numeric value is out of range for WIT u64: {error}"
+                ))
+            })?)
+        }
+    })
+}
+
+fn scalar_val_to_datum(
+    kind: &ScalarKind,
+    value: &Val,
+) -> Result<(pg_sys::Datum, bool), PgWasmError> {
+    let datum = match (kind, value) {
+        (ScalarKind::Bool, Val::Bool(v)) => v.into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build boolean datum".to_string())
+        })?,
+        (ScalarKind::Char, Val::Char(v)) => v.to_string().into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build text datum for char".to_string())
+        })?,
+        (ScalarKind::F32, Val::Float32(v)) => v.into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build real datum".to_string())
+        })?,
+        (ScalarKind::F64, Val::Float64(v)) => v.into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build double precision datum".to_string())
+        })?,
+        (ScalarKind::S8, Val::S8(v)) => i16::from(*v).into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build int2 datum for s8".to_string())
+        })?,
+        (ScalarKind::S16, Val::S16(v)) => v.into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build int2 datum".to_string())
+        })?,
+        (ScalarKind::S32, Val::S32(v)) => v.into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build int4 datum".to_string())
+        })?,
+        (ScalarKind::S64, Val::S64(v)) => v.into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build int8 datum".to_string())
+        })?,
+        (ScalarKind::String, Val::String(v)) => v.clone().into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build text datum".to_string())
+        })?,
+        (ScalarKind::U8, Val::U8(v)) => i16::from(*v).into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build int2 datum for u8".to_string())
+        })?,
+        (ScalarKind::U16, Val::U16(v)) => i32::from(*v).into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build int4 datum for u16".to_string())
+        })?,
+        (ScalarKind::U32, Val::U32(v)) => i64::from(*v).into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build int8 datum for u32".to_string())
+        })?,
+        (ScalarKind::U64, Val::U64(v)) => AnyNumeric::try_from(*v)
+            .map_err(|error| {
+                PgWasmError::ValidationFailed(format!(
+                    "failed to convert WIT u64 to numeric: {error}"
+                ))
+            })?
+            .into_datum()
+            .ok_or_else(|| {
+                PgWasmError::Internal("marshaling: failed to build numeric datum".to_string())
+            })?,
+        _ => {
+            return Err(PgWasmError::ValidationFailed(
+                "Wasm value shape does not match scalar marshaling plan".to_string(),
+            ));
+        }
+    };
+    Ok((datum, false))
+}
+
+fn string_to_char_val(value: &str) -> Result<Val, PgWasmError> {
+    let mut chars = value.chars();
+    let Some(ch) = chars.next() else {
+        return Err(PgWasmError::ValidationFailed(
+            "text value is empty; expected one Unicode scalar for WIT char".to_string(),
+        ));
+    };
+    if chars.next().is_some() {
+        return Err(PgWasmError::ValidationFailed(format!(
+            "text value `{value}` contains more than one Unicode scalar for WIT char"
+        )));
+    }
+    Ok(Val::Char(ch))
+}
+
 fn names_for_flag_bits(names: &[String], bits: i32) -> Result<Vec<String>, PgWasmError> {
     let mut out = Vec::new();
     for (i, n) in names.iter().enumerate() {
@@ -572,42 +887,7 @@ pub(crate) fn val_to_datum(
     match (plan, val) {
         (MarshalPlan::Option(_inner), Val::Option(None)) => Ok((pg_sys::Datum::from(0usize), true)),
         (MarshalPlan::Option(inner), Val::Option(Some(v))) => val_to_datum(inner, v),
-        (MarshalPlan::Scalar(ScalarKind::Bool), Val::Bool(b)) => {
-            let d = b.into_datum().ok_or_else(|| {
-                PgWasmError::Internal("marshaling: failed to build boolean datum".to_string())
-            })?;
-            Ok((d, false))
-        }
-        (MarshalPlan::Scalar(ScalarKind::Int2), Val::S16(v)) => {
-            let d = v.into_datum().ok_or_else(|| {
-                PgWasmError::Internal("marshaling: failed to build int2 datum".to_string())
-            })?;
-            Ok((d, false))
-        }
-        (MarshalPlan::Scalar(ScalarKind::Int4), Val::S32(v)) => {
-            let d = v.into_datum().ok_or_else(|| {
-                PgWasmError::Internal("marshaling: failed to build int4 datum".to_string())
-            })?;
-            Ok((d, false))
-        }
-        (MarshalPlan::Scalar(ScalarKind::Int4), Val::U32(v)) => {
-            let d = (*v as i32).into_datum().ok_or_else(|| {
-                PgWasmError::Internal("marshaling: failed to build int4 datum".to_string())
-            })?;
-            Ok((d, false))
-        }
-        (MarshalPlan::Scalar(ScalarKind::Int8), Val::S64(v)) => {
-            let d = v.into_datum().ok_or_else(|| {
-                PgWasmError::Internal("marshaling: failed to build int8 datum".to_string())
-            })?;
-            Ok((d, false))
-        }
-        (MarshalPlan::Scalar(ScalarKind::Text), Val::String(s)) => {
-            let d = s.clone().into_datum().ok_or_else(|| {
-                PgWasmError::Internal("marshaling: failed to build text datum".to_string())
-            })?;
-            Ok((d, false))
-        }
+        (MarshalPlan::Scalar(kind), value) => scalar_val_to_datum(kind, value),
         (MarshalPlan::Enum(names), Val::Enum(label)) => {
             if !names.iter().any(|n| n == label) {
                 return Err(PgWasmError::ValidationFailed(format!(
@@ -637,8 +917,11 @@ pub(crate) fn val_to_datum(
             build_result_composite(ok, err, maybe.as_deref(), false)
         }
         (MarshalPlan::List(inner), v @ Val::List(_)) => {
-            if matches!(inner.as_ref(), MarshalPlan::Scalar(ScalarKind::Int4)) {
+            if matches!(inner.as_ref(), MarshalPlan::Scalar(ScalarKind::S32)) {
                 return list::list_val_to_int4_array(v);
+            }
+            if matches!(inner.as_ref(), MarshalPlan::Scalar(ScalarKind::S64)) {
+                return list::list_val_to_int8_array(v);
             }
             Err(PgWasmError::Unsupported(
                 "list element type is not supported for this marshaling plan".to_string(),
@@ -715,7 +998,7 @@ pub(crate) fn val_to_datum(
                 PgWasmError::ValidationFailed(format!("unknown variant case `{name}`"))
             })?;
             let (disc_d, _) = val_to_datum(
-                &MarshalPlan::Scalar(ScalarKind::Text),
+                &MarshalPlan::Scalar(ScalarKind::String),
                 &Val::String(name.clone()),
             )?;
             let payload_datum: Option<pg_sys::Datum> = match (&case.payload, payload) {
@@ -788,10 +1071,16 @@ fn build_result_composite(
 fn scalar_type_oid(plan: &MarshalPlan) -> Result<pg_sys::Oid, PgWasmError> {
     match plan {
         MarshalPlan::Scalar(ScalarKind::Bool) => Ok(pg_sys::BOOLOID),
-        MarshalPlan::Scalar(ScalarKind::Int2) => Ok(pg_sys::INT2OID),
-        MarshalPlan::Scalar(ScalarKind::Int4) => Ok(pg_sys::INT4OID),
-        MarshalPlan::Scalar(ScalarKind::Int8) => Ok(pg_sys::INT8OID),
-        MarshalPlan::Scalar(ScalarKind::Text) => Ok(pg_sys::TEXTOID),
+        MarshalPlan::Scalar(ScalarKind::Char) => Ok(pg_sys::TEXTOID),
+        MarshalPlan::Scalar(ScalarKind::F32) => Ok(pg_sys::FLOAT4OID),
+        MarshalPlan::Scalar(ScalarKind::F64) => Ok(pg_sys::FLOAT8OID),
+        MarshalPlan::Scalar(ScalarKind::S8 | ScalarKind::S16 | ScalarKind::U8) => {
+            Ok(pg_sys::INT2OID)
+        }
+        MarshalPlan::Scalar(ScalarKind::S32 | ScalarKind::U16) => Ok(pg_sys::INT4OID),
+        MarshalPlan::Scalar(ScalarKind::S64 | ScalarKind::U32) => Ok(pg_sys::INT8OID),
+        MarshalPlan::Scalar(ScalarKind::String) => Ok(pg_sys::TEXTOID),
+        MarshalPlan::Scalar(ScalarKind::U64) => Ok(pg_sys::NUMERICOID),
         _ => Err(PgWasmError::Unsupported(
             "result composite supports only scalar ok/err types in this build".to_string(),
         )),
@@ -847,16 +1136,18 @@ mod host_tests {
         let export = Export {
             params: vec![ExportSlot {
                 is_option: false,
+                pg_oid: pg_sys::INT4OID,
                 pg_type: PgType::Scalar("int4"),
             }],
             result: Some(ExportSlot {
                 is_option: false,
+                pg_oid: pg_sys::BOOLOID,
                 pg_type: PgType::Scalar("boolean"),
             }),
         };
         let plans = plan_marshaler(&TypePlan { entries: vec![] }, &export).unwrap();
         assert_eq!(plans.len(), 2);
-        assert!(matches!(plans[0], MarshalPlan::Scalar(ScalarKind::Int4)));
+        assert!(matches!(plans[0], MarshalPlan::Scalar(ScalarKind::S32)));
         assert!(matches!(plans[1], MarshalPlan::Scalar(ScalarKind::Bool)));
     }
 
@@ -873,8 +1164,7 @@ mod host_tests {
 #[cfg(feature = "pg_test")]
 #[pgrx::pg_schema]
 mod tests {
-    use pgrx::prelude::*;
-    use pgrx::spi::Spi;
+    use pgrx::{prelude::*, spi::Spi};
 
     use super::*;
 
@@ -891,11 +1181,11 @@ mod tests {
             fields: vec![
                 FieldPlan {
                     name: "a".to_string(),
-                    plan: Box::new(MarshalPlan::Scalar(ScalarKind::Int4)),
+                    plan: Box::new(MarshalPlan::Scalar(ScalarKind::S32)),
                 },
                 FieldPlan {
                     name: "b".to_string(),
-                    plan: Box::new(MarshalPlan::Scalar(ScalarKind::Text)),
+                    plan: Box::new(MarshalPlan::Scalar(ScalarKind::String)),
                 },
             ],
             pg_oid: row_oid,
@@ -911,8 +1201,8 @@ mod tests {
 
         let tuple_plan = MarshalPlan::Tuple {
             elements: vec![
-                MarshalPlan::Scalar(ScalarKind::Int4),
-                MarshalPlan::Scalar(ScalarKind::Text),
+                MarshalPlan::Scalar(ScalarKind::S32),
+                MarshalPlan::Scalar(ScalarKind::String),
             ],
             pg_oid: row_oid,
         };
@@ -935,7 +1225,7 @@ mod tests {
                 },
                 CasePlan {
                     name: "n".to_string(),
-                    payload: Some(Box::new(MarshalPlan::Scalar(ScalarKind::Int4))),
+                    payload: Some(Box::new(MarshalPlan::Scalar(ScalarKind::S32))),
                 },
             ],
             pg_oid: var_oid,
@@ -954,7 +1244,7 @@ mod tests {
         let ev2 = datum_to_val(&enum_plan, ed, false, pg_sys::InvalidOid).unwrap();
         assert_eq!(ev2, ev);
 
-        let opt_plan = MarshalPlan::Option(Box::new(MarshalPlan::Scalar(ScalarKind::Int4)));
+        let opt_plan = MarshalPlan::Option(Box::new(MarshalPlan::Scalar(ScalarKind::S32)));
         let ov = Val::Option(Some(Box::new(Val::S32(7))));
         let (od, on) = val_to_datum(&opt_plan, &ov).unwrap();
         assert!(!on);
@@ -966,9 +1256,84 @@ mod tests {
         let onone2 = datum_to_val(&opt_plan, odn, true, pg_sys::InvalidOid).unwrap();
         assert_eq!(onone2, onone);
 
+        let scalar_cases = vec![
+            (
+                MarshalPlan::Scalar(ScalarKind::S8),
+                (-8i16).into_datum().unwrap(),
+                Val::S8(-8),
+            ),
+            (
+                MarshalPlan::Scalar(ScalarKind::U8),
+                250i16.into_datum().unwrap(),
+                Val::U8(250),
+            ),
+            (
+                MarshalPlan::Scalar(ScalarKind::U16),
+                65_535i32.into_datum().unwrap(),
+                Val::U16(65_535),
+            ),
+            (
+                MarshalPlan::Scalar(ScalarKind::U32),
+                4_294_967_295i64.into_datum().unwrap(),
+                Val::U32(u32::MAX),
+            ),
+            (
+                MarshalPlan::Scalar(ScalarKind::F32),
+                1.5f32.into_datum().unwrap(),
+                Val::Float32(1.5),
+            ),
+            (
+                MarshalPlan::Scalar(ScalarKind::F64),
+                2.25f64.into_datum().unwrap(),
+                Val::Float64(2.25),
+            ),
+            (
+                MarshalPlan::Scalar(ScalarKind::Char),
+                "A".to_string().into_datum().unwrap(),
+                Val::Char('A'),
+            ),
+        ];
+        for (plan, datum, expected) in scalar_cases {
+            let value = datum_to_val(&plan, datum, false, pg_sys::InvalidOid).unwrap();
+            assert_eq!(value, expected);
+            let (roundtrip_datum, roundtrip_null) = val_to_datum(&plan, &value).unwrap();
+            assert!(!roundtrip_null);
+            let roundtrip =
+                datum_to_val(&plan, roundtrip_datum, false, pg_sys::InvalidOid).unwrap();
+            assert_eq!(roundtrip, expected);
+        }
+
+        let numeric = AnyNumeric::try_from(u64::MAX).unwrap();
+        let u64_plan = MarshalPlan::Scalar(ScalarKind::U64);
+        let u64_val = datum_to_val(
+            &u64_plan,
+            numeric.into_datum().unwrap(),
+            false,
+            pg_sys::InvalidOid,
+        )
+        .unwrap();
+        assert_eq!(u64_val, Val::U64(u64::MAX));
+        let (u64_datum, u64_null) = val_to_datum(&u64_plan, &u64_val).unwrap();
+        assert!(!u64_null);
+        assert_eq!(
+            datum_to_val(&u64_plan, u64_datum, false, pg_sys::InvalidOid).unwrap(),
+            u64_val
+        );
+
+        let invalid_char = "AB".to_string().into_datum().unwrap();
+        assert!(
+            datum_to_val(
+                &MarshalPlan::Scalar(ScalarKind::Char),
+                invalid_char,
+                false,
+                pg_sys::InvalidOid
+            )
+            .is_err()
+        );
+
         let res_plan = MarshalPlan::Result {
-            ok: Box::new(MarshalPlan::Scalar(ScalarKind::Int4)),
-            err: Box::new(MarshalPlan::Scalar(ScalarKind::Text)),
+            ok: Box::new(MarshalPlan::Scalar(ScalarKind::S32)),
+            err: Box::new(MarshalPlan::Scalar(ScalarKind::String)),
         };
         let rv = Val::Result(Ok(Some(Box::new(Val::S32(42)))));
         let (rd, rn) = val_to_datum(&res_plan, &rv).unwrap();
@@ -976,7 +1341,7 @@ mod tests {
         let rv2 = datum_to_val(&res_plan, rd, false, pg_sys::InvalidOid).unwrap();
         assert_eq!(rv2, rv);
 
-        let list_plan = MarshalPlan::List(Box::new(MarshalPlan::Scalar(ScalarKind::Int4)));
+        let list_plan = MarshalPlan::List(Box::new(MarshalPlan::Scalar(ScalarKind::S32)));
         let arr: Array<i32> = Spi::get_one("SELECT ARRAY[10, 20]::int4[] AS a")
             .unwrap()
             .unwrap();
@@ -991,6 +1356,24 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert!(matches!(items[0], Val::S32(10)));
         assert!(matches!(items[1], Val::S32(20)));
+
+        let list_i64_plan = MarshalPlan::List(Box::new(MarshalPlan::Scalar(ScalarKind::S64)));
+        let arr_i64: Array<i64> = Spi::get_one("SELECT ARRAY[10000000000, -3]::int8[] AS a")
+            .unwrap()
+            .unwrap();
+        let ad_i64 = arr_i64.into_datum().unwrap();
+        let lv_i64 = datum_to_val(&list_i64_plan, ad_i64, false, pg_sys::InvalidOid).unwrap();
+        let (ld_i64, ln_i64) = val_to_datum(&list_i64_plan, &lv_i64).unwrap();
+        assert!(!ln_i64);
+        let lv_i64_roundtrip =
+            datum_to_val(&list_i64_plan, ld_i64, false, pg_sys::InvalidOid).unwrap();
+        assert_eq!(lv_i64_roundtrip, lv_i64);
+        let Val::List(items_i64) = &lv_i64 else {
+            panic!("expected int8 list");
+        };
+        assert_eq!(items_i64.len(), 2);
+        assert!(matches!(items_i64[0], Val::S64(10000000000)));
+        assert!(matches!(items_i64[1], Val::S64(-3)));
 
         Spi::run("DROP TYPE IF EXISTS pgwasm.marshal_pg_var CASCADE").unwrap();
         Spi::run("DROP TYPE IF EXISTS pgwasm.marshal_pg_row CASCADE").unwrap();

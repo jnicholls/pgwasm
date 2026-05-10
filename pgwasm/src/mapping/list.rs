@@ -1,10 +1,6 @@
 //! `list<T>` and `list<u8>` marshaling helpers for `wasmtime::component::Val`.
 
-use pgrx::datum::DatumWithOid;
-use pgrx::pg_sys;
-use pgrx::prelude::*;
-use pgrx::spi::Spi;
-
+use pgrx::{datum::DatumWithOid, pg_sys, prelude::*, spi::Spi};
 use wasmtime::component::Val;
 
 use crate::errors::PgWasmError;
@@ -83,6 +79,42 @@ where
     Ok(Val::List(items))
 }
 
+/// `int8[]` datum → `Val::List` using SPI array expansion.
+pub(crate) fn array_datum_to_list_i64<F>(
+    datum: pg_sys::Datum,
+    is_null: bool,
+    mut map: F,
+) -> Result<Val, PgWasmError>
+where
+    F: FnMut(i64) -> Result<Val, PgWasmError>,
+{
+    if is_null {
+        return Ok(Val::List(Vec::new()));
+    }
+    let arg = unsafe { DatumWithOid::new(datum, pg_sys::INT8ARRAYOID) };
+    let s: Option<String> = Spi::get_one_with_args(
+        "SELECT NULLIF(array_to_string($1::int8[], ','), '')",
+        &[arg],
+    )
+    .map_err(|e| PgWasmError::Internal(format!("list marshaling (int8[]): {e}")))?;
+    let Some(s) = s else {
+        return Ok(Val::List(Vec::new()));
+    };
+    if s.is_empty() {
+        return Ok(Val::List(Vec::new()));
+    }
+    let mut items = Vec::new();
+    for part in s.split(',') {
+        let v: i64 = part.trim().parse().map_err(|_| {
+            PgWasmError::Internal(format!(
+                "list marshaling: invalid int8 array element `{part}`"
+            ))
+        })?;
+        items.push(map(v)?);
+    }
+    Ok(Val::List(items))
+}
+
 /// `Val::List` of `Val::S32` → `int4[]` via SPI (CSV → typed array).
 pub(crate) fn list_val_to_int4_array(val: &Val) -> Result<(pg_sys::Datum, bool), PgWasmError> {
     let Val::List(items) = val else {
@@ -121,6 +153,50 @@ pub(crate) fn list_val_to_int4_array(val: &Val) -> Result<(pg_sys::Datum, bool),
     };
     let datum = arr.into_datum().ok_or_else(|| {
         PgWasmError::Internal("list marshaling: failed to extract int4[] datum".to_string())
+    })?;
+    Ok((datum, false))
+}
+
+/// `Val::List` of `Val::S64` → `int8[]` via SPI (CSV → typed array).
+pub(crate) fn list_val_to_int8_array(val: &Val) -> Result<(pg_sys::Datum, bool), PgWasmError> {
+    let Val::List(items) = val else {
+        return Err(PgWasmError::ValidationFailed(
+            "expected Val::List for array marshaling".to_string(),
+        ));
+    };
+    let mut parts = Vec::with_capacity(items.len());
+    for item in items {
+        let Val::S64(v) = item else {
+            return Err(PgWasmError::Unsupported(
+                "list→int8[] only supports Val::S64 elements in this build".to_string(),
+            ));
+        };
+        parts.push(v.to_string());
+    }
+    let arr: Array<i64> = if parts.is_empty() {
+        Spi::get_one("SELECT ARRAY[]::int8[] AS a")
+            .map_err(|e| PgWasmError::Internal(format!("list marshaling (empty int8 array): {e}")))?
+            .ok_or_else(|| {
+                PgWasmError::Internal(
+                    "list marshaling: empty int8 array query returned no row".to_string(),
+                )
+            })?
+    } else {
+        let csv = parts.join(",");
+        let arg = unsafe { DatumWithOid::new(csv, pg_sys::TEXTOID) };
+        Spi::get_one_with_args(
+            "SELECT ARRAY(SELECT unnest(string_to_array($1, ','))::int8) AS a",
+            &[arg],
+        )
+        .map_err(|e| PgWasmError::Internal(format!("list marshaling (build int8 array): {e}")))?
+        .ok_or_else(|| {
+            PgWasmError::Internal(
+                "list marshaling: int8 ARRAY build query returned no row".to_string(),
+            )
+        })?
+    };
+    let datum = arr.into_datum().ok_or_else(|| {
+        PgWasmError::Internal("list marshaling: failed to extract int8[] datum".to_string())
     })?;
     Ok((datum, false))
 }
