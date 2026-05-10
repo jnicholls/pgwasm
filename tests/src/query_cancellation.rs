@@ -32,7 +32,7 @@ async fn query_cancel_maps_to_query_canceled() {
 
     let spin_client = connect().await.unwrap();
     let ident = wasm_fn_ident(&module_name, "spin");
-    let sql = format!(r#"SELECT wasm."{}"()"#, ident.replace('"', "\"\""));
+    let sql = format!(r#"SELECT pgwasm."{}"()"#, ident.replace('"', "\"\""));
 
     let spin_task = tokio::spawn(async move {
         spin_client
