@@ -416,7 +416,7 @@ mod host_tests {
                         write,
                     }
 
-                    echo: func(person: person, flags: perms, maybe: option<string>) -> result<string, u8>;
+                    echo: func(person: person, perms-arg: perms, maybe: option<string>) -> result<string, u8>;
                 }
 
                 world fixture {
