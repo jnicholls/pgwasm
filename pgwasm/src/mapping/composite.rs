@@ -796,16 +796,9 @@ fn scalar_val_to_datum(
         (ScalarKind::U32, Val::U32(v)) => i64::from(*v).into_datum().ok_or_else(|| {
             PgWasmError::Internal("marshaling: failed to build int8 datum for u32".to_string())
         })?,
-        (ScalarKind::U64, Val::U64(v)) => AnyNumeric::try_from(*v)
-            .map_err(|error| {
-                PgWasmError::ValidationFailed(format!(
-                    "failed to convert WIT u64 to numeric: {error}"
-                ))
-            })?
-            .into_datum()
-            .ok_or_else(|| {
-                PgWasmError::Internal("marshaling: failed to build numeric datum".to_string())
-            })?,
+        (ScalarKind::U64, Val::U64(v)) => AnyNumeric::from(*v).into_datum().ok_or_else(|| {
+            PgWasmError::Internal("marshaling: failed to build numeric datum".to_string())
+        })?,
         _ => {
             return Err(PgWasmError::ValidationFailed(
                 "Wasm value shape does not match scalar marshaling plan".to_string(),
