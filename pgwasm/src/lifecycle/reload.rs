@@ -41,7 +41,7 @@ use crate::{
     proc_reg::{self, Parallel, ProcSpec, Volatility},
     runtime::{component, core as runtime_core, engine, pool},
     shmem,
-    wit::{typing, udt, world},
+    wit::{signature, typing, udt, world},
 };
 
 const ON_LOAD_WASM_NAME: &str = "on-load";
@@ -465,7 +465,7 @@ fn plan_reload_exports(
             continue;
         };
         let new_sig = export_signature_json(decoded, wasm_name)?;
-        if old_row.signature != new_sig && !breaking_allowed {
+        if signature::export_signatures_differ(&old_row.signature, &new_sig) && !breaking_allowed {
             return Err(BreakingChange::ExportSignatureChanged {
                 wasm_name: wasm_name.clone(),
             }
@@ -501,7 +501,7 @@ fn plan_reload_exports_core(
             continue;
         };
         let new_sig = json!({"abi": "core", "export": wasm_name});
-        if old_row.signature != new_sig && !breaking_allowed {
+        if signature::export_signatures_differ(&old_row.signature, &new_sig) && !breaking_allowed {
             return Err(BreakingChange::ExportSignatureChanged {
                 wasm_name: wasm_name.clone(),
             }
@@ -559,7 +559,7 @@ fn apply_export_changes(
     for (spec, wasm_name) in new_specs {
         if let Some(old_row) = old_by_wasm.get(wasm_name) {
             let new_sig = export_signature_json(decoded, wasm_name)?;
-            let sig_changed = old_row.signature != new_sig;
+            let sig_changed = signature::export_signatures_differ(&old_row.signature, &new_sig);
             let shape_changed =
                 old_row.arg_types != spec.arg_types || old_row.ret_type != norm_ret(spec.ret_type);
             if sig_changed || shape_changed {
@@ -598,7 +598,7 @@ fn apply_export_changes(
             // `old_by_wasm` can miss rows when SPI snapshots diverge (e.g. internal subtransactions);
             // never insert a second `(module_id, wasm_name)` row.
             let new_sig = export_signature_json(decoded, wasm_name)?;
-            let sig_changed = existing.signature != new_sig;
+            let sig_changed = signature::export_signatures_differ(&existing.signature, &new_sig);
             let shape_changed = existing.arg_types != spec.arg_types
                 || existing.ret_type != norm_ret(spec.ret_type);
             if sig_changed || shape_changed {
@@ -687,7 +687,8 @@ fn apply_export_changes_core(
         if let Some(old_row) = old_by_wasm.get(wasm_name) {
             let shape_changed =
                 old_row.arg_types != spec.arg_types || old_row.ret_type != norm_ret(spec.ret_type);
-            if old_row.signature != signature || shape_changed {
+            if signature::export_signatures_differ(&old_row.signature, &signature) || shape_changed
+            {
                 let Some(old_oid) = old_row.fn_oid else {
                     return Err(PgWasmError::Internal(
                         "export row missing fn_oid".to_string(),
@@ -722,7 +723,8 @@ fn apply_export_changes_core(
         } else if let Some(existing) = exports::get_by_module_and_wasm_name(module_id, wasm_name)? {
             let shape_changed = existing.arg_types != spec.arg_types
                 || existing.ret_type != norm_ret(spec.ret_type);
-            if existing.signature != signature || shape_changed {
+            if signature::export_signatures_differ(&existing.signature, &signature) || shape_changed
+            {
                 let Some(old_oid) = existing.fn_oid else {
                     return Err(PgWasmError::Internal(
                         "export row missing fn_oid".to_string(),
@@ -1268,58 +1270,7 @@ fn type_name_for_id(resolve: &wit_parser::Resolve, type_id: wit_parser::TypeId) 
 }
 
 fn export_signature_json(decoded: &world::DecodedWorld, wasm_export: &str) -> Result<Value> {
-    let world = decoded
-        .resolve
-        .worlds
-        .get(decoded.world_id)
-        .ok_or_else(|| PgWasmError::InvalidModule("decoded world missing".to_string()))?;
-
-    let mut func: Option<&Function> = None;
-    for item in world.exports.values() {
-        match item {
-            WorldItem::Function(f) => {
-                let w = export_wasm_name(&decoded.resolve, f);
-                if w == wasm_export {
-                    func = Some(f);
-                    break;
-                }
-            }
-            WorldItem::Interface { id, .. } => {
-                let Some(iface) = decoded.resolve.interfaces.get(*id) else {
-                    continue;
-                };
-                for f in iface.functions.values() {
-                    let w = export_wasm_name(&decoded.resolve, f);
-                    if w == wasm_export {
-                        func = Some(f);
-                        break;
-                    }
-                }
-            }
-            WorldItem::Type { .. } => {}
-        }
-        if func.is_some() {
-            break;
-        }
-    }
-
-    let func = func.ok_or_else(|| {
-        PgWasmError::Internal(format!(
-            "could not locate WIT function `{wasm_export}` for signature JSON"
-        ))
-    })?;
-
-    let params: Vec<Value> = func
-        .params
-        .iter()
-        .map(|p| json!({"name": p.name, "type": format!("{:?}", p.ty)}))
-        .collect();
-    let result = func.result.map(|t| json!({"type": format!("{t:?}")}));
-    Ok(json!({
-        "kind": "wit-function",
-        "params": params,
-        "result": result,
-    }))
+    signature::export_signature_json(decoded, wasm_export)
 }
 
 fn plan_export_proc_specs(
@@ -1467,9 +1418,15 @@ fn wit_wasm_type_to_pg_oid(
 ) -> Result<pg_sys::Oid> {
     match ty {
         Type::Bool => Ok(pg_sys::BOOLOID),
-        Type::S32 => Ok(pg_sys::INT4OID),
-        Type::S64 => Ok(pg_sys::INT8OID),
+        Type::Char => Ok(pg_sys::TEXTOID),
+        Type::ErrorContext => Ok(pg_sys::TEXTOID),
+        Type::F32 => Ok(pg_sys::FLOAT4OID),
+        Type::F64 => Ok(pg_sys::FLOAT8OID),
+        Type::S8 | Type::S16 | Type::U8 => Ok(pg_sys::INT2OID),
+        Type::S32 | Type::U16 => Ok(pg_sys::INT4OID),
+        Type::U32 | Type::S64 => Ok(pg_sys::INT8OID),
         Type::String => Ok(pg_sys::TEXTOID),
+        Type::U64 => Ok(pg_sys::NUMERICOID),
         Type::Id(type_id) => {
             let key = typing::export_type_key_for_id(resolve, *type_id)?;
             let row = wit_types::get_by_module_and_type_key(module_id, &key)?.ok_or_else(|| {
@@ -1479,9 +1436,6 @@ fn wit_wasm_type_to_pg_oid(
             })?;
             Ok(row.pg_type_oid)
         }
-        other => Err(PgWasmError::Unsupported(format!(
-            "WIT type `{other:?}` is not supported for automatic SQL export registration in this build"
-        ))),
     }
 }
 

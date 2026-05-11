@@ -25,7 +25,7 @@ async fn max_memory_pages_triggers_trap_or_resource_error() {
         .unwrap();
 
     let ident = wasm_fn_ident(&module_name, "grow");
-    let sql = format!(r#"SELECT wasm."{}"()"#, ident.replace('"', "\"\""));
+    let sql = format!(r#"SELECT pgwasm."{}"()"#, ident.replace('"', "\"\""));
     let err = client
         .query_one(&sql, &[])
         .await

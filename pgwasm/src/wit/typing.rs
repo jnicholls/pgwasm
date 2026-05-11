@@ -383,19 +383,19 @@ fn wit_to_pg(
         Type::S64 => Ok(PgType::Scalar("int8")),
         Type::U8 => Ok(PgType::Domain {
             base: "int2",
-            check: Some("VALUE >= 0"),
+            check: Some("VALUE >= 0 AND VALUE <= 255"),
             flag_names: None,
             name: Some(format!("{module_prefix}_u8")),
         }),
         Type::U16 => Ok(PgType::Domain {
-            base: "int2",
-            check: Some("VALUE >= 0"),
+            base: "int4",
+            check: Some("VALUE >= 0 AND VALUE <= 65535"),
             flag_names: None,
             name: Some(format!("{module_prefix}_u16")),
         }),
         Type::U32 => Ok(PgType::Domain {
             base: "int8",
-            check: Some("VALUE >= 0"),
+            check: Some("VALUE >= 0 AND VALUE <= 4294967295"),
             flag_names: None,
             name: Some(format!("{module_prefix}_u32")),
         }),
@@ -407,7 +407,12 @@ fn wit_to_pg(
         }),
         Type::F32 => Ok(PgType::Scalar("real")),
         Type::F64 => Ok(PgType::Scalar("double precision")),
-        Type::Char => Ok(PgType::Scalar("\"char\"")),
+        Type::Char => Ok(PgType::Domain {
+            base: "text",
+            check: Some("char_length(VALUE) = 1"),
+            flag_names: None,
+            name: Some(format!("{module_prefix}_char")),
+        }),
         Type::String => Ok(PgType::Scalar("text")),
         Type::ErrorContext => Ok(PgType::Scalar("text")),
         Type::Id(type_id) => map_typedef(module_prefix, resolve, type_id),
@@ -698,7 +703,7 @@ mod host_tests {
             concat!(
                 "TypePlan { entries: [",
                 "TypePlanEntry { dependencies: [], pg_type: Composite([",
-                "CompositeField { name: \"id\", ty: Domain { base: \"int8\", check: Some(\"VALUE >= 0\"), flag_names: None, name: Some(\"demo_u32\") } }, ",
+                "CompositeField { name: \"id\", ty: Domain { base: \"int8\", check: Some(\"VALUE >= 0 AND VALUE <= 4294967295\"), flag_names: None, name: Some(\"demo_u32\") } }, ",
                 "CompositeField { name: \"name\", ty: Scalar(\"text\") }",
                 "]), type_key: \"test:fixture:api/person\", wit_name: \"person\" }, ",
                 "TypePlanEntry { dependencies: [], pg_type: Enum([\"red\", \"blue\"]), type_key: \"test:fixture:api/color\", wit_name: \"color\" }",
@@ -743,7 +748,7 @@ mod host_tests {
     fn unsigned_scalars_map_to_domains() {
         let mut names = HashMap::new();
         names.insert(Type::U8, "int2");
-        names.insert(Type::U16, "int2");
+        names.insert(Type::U16, "int4");
         names.insert(Type::U32, "int8");
         names.insert(Type::U64, "numeric");
 

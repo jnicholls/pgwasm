@@ -2,26 +2,34 @@
 
 use std::sync::Arc;
 
-use pgrx::FromDatum;
-use pgrx::fcinfo::{pg_arg_is_null, pg_get_nullable_datum, pg_getarg_type};
-use pgrx::pg_guard;
-use pgrx::pg_sys::{self, Datum, FunctionCallInfo, Oid, Pg_finfo_record};
-use wasmtime::component::Val;
-use wasmtime::{Store, StoreLimits, StoreLimitsBuilder};
+use pgrx::{
+    FromDatum,
+    fcinfo::{pg_arg_is_null, pg_get_nullable_datum, pg_getarg_type},
+    pg_guard,
+    pg_sys::{self, Datum, FunctionCallInfo, Oid, Pg_finfo_record},
+};
+use wasmtime::{Store, StoreLimits, StoreLimitsBuilder, component::Val};
 
-use crate::artifacts;
-use crate::catalog::{exports, modules};
-use crate::errors::{DEFAULT_WASMTIME_VERSION, ErrorContext, PgWasmError};
-use crate::guc;
-use crate::mapping::composite::{self, Export, ExportSlot, MarshalPlan, plan_marshaler};
-use crate::policy::{self, EffectivePolicy, GucSnapshot};
-use crate::registry;
-use crate::runtime::component::{self, StoreCtx};
-use crate::runtime::core;
-use crate::runtime::engine;
-use crate::runtime::pool;
-use crate::shmem::{self, ExportCounterKind};
-use crate::wit::typing::{PgType, TypePlan};
+use crate::{
+    artifacts,
+    catalog::{exports, modules, wit_types},
+    errors::{DEFAULT_WASMTIME_VERSION, ErrorContext, PgWasmError},
+    guc,
+    mapping::composite::{
+        self, Export, ExportSlot, MarshalPlan, plan_marshaler, plan_marshaler_from_signature,
+    },
+    policy::{self, EffectivePolicy, GucSnapshot},
+    registry,
+    runtime::{
+        component::{self, StoreCtx},
+        core, engine, pool,
+    },
+    shmem::{self, ExportCounterKind},
+    wit::{
+        signature,
+        typing::{PgType, TypePlan},
+    },
+};
 
 #[pg_guard]
 #[unsafe(no_mangle)]
@@ -208,9 +216,17 @@ pub(crate) fn configure_store_for_invocation(
 fn oid_scalar_pg_type(oid: Oid) -> Result<PgType, PgWasmError> {
     Ok(match oid {
         o if o == pg_sys::BOOLOID => PgType::Scalar("boolean"),
+        o if o == pg_sys::FLOAT4OID => PgType::Scalar("real"),
+        o if o == pg_sys::FLOAT8OID => PgType::Scalar("double precision"),
         o if o == pg_sys::INT2OID => PgType::Scalar("int2"),
         o if o == pg_sys::INT4OID => PgType::Scalar("int4"),
         o if o == pg_sys::INT8OID => PgType::Scalar("int8"),
+        o if o == pg_sys::NUMERICOID => PgType::Domain {
+            base: "numeric",
+            check: None,
+            flag_names: None,
+            name: None,
+        },
         o if o == pg_sys::TEXTOID => PgType::Scalar("text"),
         _ => {
             return Err(PgWasmError::Unsupported(format!(
@@ -229,6 +245,7 @@ fn export_surface_from_proc(
     for oid in arg_types {
         params.push(ExportSlot {
             is_option: false,
+            pg_oid: *oid,
             pg_type: oid_scalar_pg_type(*oid)?,
         });
     }
@@ -237,6 +254,7 @@ fn export_surface_from_proc(
         Some(oid) if oid == pg_sys::VOIDOID => None,
         Some(oid) => Some(ExportSlot {
             is_option: false,
+            pg_oid: oid,
             pg_type: oid_scalar_pg_type(oid)?,
         }),
     };
@@ -246,6 +264,34 @@ fn export_surface_from_proc(
 fn marshal_plans_for_export(export: &Export) -> Result<Vec<MarshalPlan>, PgWasmError> {
     let empty = TypePlan { entries: vec![] };
     plan_marshaler(&empty, export)
+}
+
+fn marshal_plans_for_export_row(
+    export_row: &exports::ExportRow,
+) -> Result<(Vec<MarshalPlan>, bool), PgWasmError> {
+    match signature::parse_export_signature(&export_row.signature) {
+        Ok(sig) => {
+            let mut type_oid = |type_key: &str| {
+                let row = wit_types::get_by_module_and_type_key(export_row.module_id, type_key)?
+                    .ok_or_else(|| {
+                        PgWasmError::Internal(format!(
+                            "WIT type `{type_key}` is not registered in catalog for marshaling"
+                        ))
+                    })?;
+                Ok(row.pg_type_oid)
+            };
+            let has_result = sig.result.is_some();
+            let plans = plan_marshaler_from_signature(&sig, &mut type_oid)?;
+            Ok((plans, has_result))
+        }
+        Err(_) => {
+            let export_surface =
+                export_surface_from_proc(&export_row.arg_types, export_row.ret_type)?;
+            let has_result = export_surface.result.is_some();
+            let plans = marshal_plans_for_export(&export_surface)?;
+            Ok((plans, has_result))
+        }
+    }
 }
 
 fn export_index_in_module(module_id: i64, export_id: i64) -> Result<u32, PgWasmError> {
@@ -275,8 +321,7 @@ fn invoke_component_export(
     let component =
         Arc::new(unsafe { component::load_precompiled(wasm_engine, &cwasm_path, &expected_hash)? });
 
-    let export_surface = export_surface_from_proc(&export_row.arg_types, export_row.ret_type)?;
-    let plans = marshal_plans_for_export(&export_surface)?;
+    let (plans, has_result) = marshal_plans_for_export_row(export_row)?;
     let nargs = export_row.arg_types.len();
     if plans.len() < nargs {
         return Err(PgWasmError::Internal(
@@ -284,11 +329,7 @@ fn invoke_component_export(
         ));
     }
     let param_plans = &plans[..nargs];
-    let result_plan = if export_surface.result.is_some() {
-        plans.get(nargs)
-    } else {
-        None
-    };
+    let result_plan = if has_result { plans.get(nargs) } else { None };
 
     let mut pooled =
         pool::acquire_pooled(module_id, Arc::clone(&component), wasm_engine, effective)?;
@@ -436,8 +477,10 @@ unsafe fn fn_oid_from_fcinfo(fcinfo: FunctionCallInfo) -> Oid {
 mod reconfigure {
     use serde_json::Value;
 
-    use crate::config::{Limits, PolicyOverrides};
-    use crate::errors::{PgWasmError, Result};
+    use crate::{
+        config::{Limits, PolicyOverrides},
+        errors::{PgWasmError, Result},
+    };
 
     pub(super) fn policy_overrides_from_module_json(value: &Value) -> Result<PolicyOverrides> {
         policy_overrides_from_value(value)
@@ -608,17 +651,20 @@ mod host_tests {
 mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use pgrx::prelude::*;
-    use pgrx::spi::Spi;
+    use pgrx::{prelude::*, spi::Spi};
     use serde_json::json;
     use wit_component::{ComponentEncoder, StringEncoding, embed_component_metadata};
     use wit_parser::Resolve;
 
-    use crate::artifacts;
-    use crate::catalog::exports;
-    use crate::catalog::modules::{self, ModuleRow};
-    use crate::proc_reg::{self, Parallel, ProcSpec, Volatility};
-    use crate::shmem::{ExportCounterKind, allocate_slots, free_slots, read_export_counter};
+    use crate::{
+        artifacts,
+        catalog::{
+            exports,
+            modules::{self, ModuleRow},
+        },
+        proc_reg::{self, Parallel, ProcSpec, Volatility},
+        shmem::{ExportCounterKind, allocate_slots, free_slots, read_export_counter},
+    };
 
     static NEXT_MODULE_ID: AtomicU64 = AtomicU64::new(900_000);
 

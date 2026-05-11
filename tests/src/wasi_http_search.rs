@@ -122,7 +122,7 @@ async fn wasi_http_invocation_fails_when_allow_wasi_http_off() {
     .unwrap();
 
     let ident = wasm_fn_ident(&module_name, "search-titles");
-    let sql = format!(r#"SELECT wasm."{}"()"#, ident.replace('"', "\"\""));
+    let sql = format!(r#"SELECT pgwasm."{}"()"#, ident.replace('"', "\"\""));
     let err = client
         .query_one(&sql, &[])
         .await

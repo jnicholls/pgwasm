@@ -30,7 +30,7 @@ async fn fuel_exhaustion_maps_to_program_limit_exceeded() {
 
     let ident = wasm_fn_ident(&module_name, "spin-param");
     let sql = format!(
-        r#"SELECT wasm."{}"(1000000::int4)"#,
+        r#"SELECT pgwasm."{}"(1000000::int4)"#,
         ident.replace('"', "\"\"")
     );
     let err = client
