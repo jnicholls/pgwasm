@@ -2,44 +2,55 @@
 
 This page is the canonical reference for how `pgwasm` maps
 [WIT](https://component-model.bytecodealliance.org/design/wit.html) types
-to PostgreSQL types. The mapping is deterministic: the same WIT world
-always produces the same PG type names (up to the `<module_prefix>`
-derived from the module name), which lets `pgwasm.pgwasm_reload` preserve OIDs
-across code changes when the signatures are unchanged.
+to PostgreSQL types. The mapping is implemented in `pgwasm/src/wit/typing.rs`
+and registered via `pgwasm/src/wit/udt.rs`.
 
-For the architectural rationale, see
+For architecture context, see
 [`docs/architecture.md` §8](architecture.md#8-type-mapping-and-udt-registration).
-For the authoritative list of GUCs that gate loading and invocation, see
-[`docs/guc.md`](guc.md).
+For GUCs, see [`docs/guc.md`](guc.md).
 
-All examples assume a module loaded with `name => 'ex'`, so registered
-UDTs are named `ex_<kind>_<name>` and exports are `ex_<fn_name>`.
+## Naming conventions
+
+- **SQL functions** — For a module loaded with `module_name => 'ex'`, each export
+  becomes `pgwasm."ex__<sanitized_key>"` where `<sanitized_key>` comes from the WIT
+  export path (`/` and `-` become `_`). Example: export `add-s32` → `ex__add_s32`.
+- **SQL types** — Registered types live in the extension schema as
+  `pgwasm.m<module_id>_<suffix>` where `<suffix>` is a sanitized WIT name or domain
+  alias (`wit::udt::type_sql_ident`). The catalog table `pgwasm.wit_types.wit_name`
+  stores the stable **type key** (`package:interface/name`) used across reloads;
+  `pgwasm.pgwasm_wit_types()` exposes it as `module_name::<wit_name>`.
 
 ## Summary
 
 | WIT type | PostgreSQL representation |
 |----------|---------------------------|
 | `bool` | `boolean` |
-| `s8`, `s16`, `s32` | `smallint` / `integer` |
+| `s8`, `s16` | `smallint` |
+| `s32` | `integer` |
 | `s64` | `bigint` |
-| `u8`, `u16`, `u32` | `integer` (non-negative `CHECK` domain) or `bigint` when the range requires it |
-| `u64` | `numeric` domain with `CHECK (x >= 0 AND x <= 18446744073709551615)` |
+| `u8` | `smallint` domain with `CHECK (VALUE BETWEEN 0 AND 255)` |
+| `u16` | `integer` domain with `CHECK (VALUE BETWEEN 0 AND 65535)` |
+| `u32` | `bigint` domain with full `u32` range check |
+| `u64` | `numeric` domain with `0 .. 2^64-1` check |
 | `f32`, `f64` | `real`, `double precision` |
-| `char` | `"char"` (single byte) when reachable, otherwise `text` |
-| `string` | `text` (UTF-8) |
+| `char` | `text` domain enforcing a single Unicode character (`char_length = 1`) |
+| `string`, `error-context` | `text` |
 | `list<u8>` | `bytea` |
-| `list<T>` | `T[]` when `T` is a simple scalar; otherwise a `jsonb` domain |
-| `option<T>` | nullable column of the PG mapping of `T` |
-| `result<T, E>` | composite `(ok T?, err E?)`, or tagged `jsonb` when `E` is a complex variant |
-| `tuple<A, B, ...>` | anonymous composite registered as `pgwasm.m<module_id>_<type_key>` (stable key derived from the WIT shape) |
-| `record { ... }` | named composite type |
-| `variant { Foo(A), Bar, ... }` | composite `(tag text, foo A, bar boolean default false)` or tagged `jsonb` if recursive |
-| `enum { ... }` | PG enum |
-| `flags { ... }` | `integer` domain with documented bit layout |
-| `resource` | opaque `bigint` handle; borrowed vs owned enforced at marshal time |
+| `list<T>` | `NOT NULL` array domain over the mapping of `T` |
+| `option<T>` | PostgreSQL type for `T`, nullable at the function boundary |
+| `result<T, E>` | Composite `(ok, err)`; missing arms use internal `void` typing rules in `wit::udt` |
+| `tuple<…>` | Composite with fields `f0`, `f1`, … |
+| `record { … }` | Composite with WIT field names |
+| `variant { … }` | Composite `(discriminant text, payload jsonb)` |
+| `enum { … }` | PostgreSQL `ENUM` |
+| `flags { … }` | `integer` domain; `CHECK` bounds `0 .. (1 << n) - 1` for `n` flags |
+| `resource`, `borrow<T>`, `own<T>` | `bigint` |
+| `map`, fixed-size list, `future`, `stream` | `jsonb` domain (named `*_json`) |
 
-The rest of this document expands every row with a concrete WIT fragment,
-the DDL issued by `pgwasm.pgwasm_load`, and a sample `SELECT`.
+**Limitation:** nested user-defined composites inside record fields are not yet
+supported for DDL (`wit::udt::pg_type_sql` returns `Unsupported` for composite /
+enum / variant field types). Prefer scalars, domains, and arrays of scalars inside
+records until that path is wired.
 
 ## 1. Primitives
 
@@ -50,8 +61,8 @@ export is-even: func(n: s32) -> bool;
 ```
 
 ```sql
--- CREATE FUNCTION ex_is_even(n integer) RETURNS boolean ...
-SELECT ex_is_even(4);  -- t
+-- CREATE FUNCTION ex__is_even(n integer) RETURNS boolean ...
+SELECT ex__is_even(4);  -- t
 ```
 
 ### 1.2 Signed integers
@@ -66,31 +77,22 @@ export add-s64: func(a: s64, b: s64) -> s64;
 - `s64` → `bigint`
 
 ```sql
-SELECT ex_add_s32(1::int, 2::int);     -- 3
-SELECT ex_add_s64(1::bigint, 2::bigint); -- 3
+SELECT ex__add_s32(1::int, 2::int);
+SELECT ex__add_s64(1::bigint, 2::bigint);
 ```
 
-### 1.3 Unsigned integers (domain wrappers)
+### 1.3 Unsigned integers
 
-Because PostgreSQL has no native unsigned integer types, `pgwasm` wraps
-unsigned WIT types in domains that enforce the non-negative range. The
-domain names are derived from the module prefix:
+Domains use the `m<module_id>_u8` / `_u16` / `_u32` / `_u64` suffix pattern.
 
 ```wit
 export next: func(n: u32) -> u32;
 ```
 
 ```sql
--- CREATE DOMAIN ex_u32 AS integer
---   CHECK (VALUE >= 0);
--- CREATE FUNCTION ex_next(n ex_u32) RETURNS ex_u32 ...
-SELECT ex_next(42::ex_u32);
+-- CREATE DOMAIN pgwasm.m42_u32 AS bigint CHECK (VALUE >= 0 AND VALUE <= 4294967295);
+-- CREATE FUNCTION ex__next(n pgwasm.m42_u32) RETURNS pgwasm.m42_u32 ...
 ```
-
-- `u8` → `integer` domain `CHECK (VALUE BETWEEN 0 AND 255)`
-- `u16` → `integer` domain `CHECK (VALUE BETWEEN 0 AND 65535)`
-- `u32` → `integer` domain `CHECK (VALUE >= 0)` (widened storage)
-- `u64` → `numeric` domain `CHECK (VALUE BETWEEN 0 AND 18446744073709551615)`
 
 ### 1.4 Floats
 
@@ -98,26 +100,13 @@ SELECT ex_next(42::ex_u32);
 export hypot: func(x: f64, y: f64) -> f64;
 ```
 
-- `f32` → `real`
-- `f64` → `double precision`
-
 ```sql
-SELECT ex_hypot(3::float8, 4::float8);  -- 5
+SELECT ex__hypot(3::float8, 4::float8);  -- 5
 ```
 
 ### 1.5 `char`
 
-`char` in WIT is a Unicode scalar value. When the reachable domain is
-clearly a byte, `pgwasm` uses PostgreSQL's `"char"` type; otherwise it
-widens to `text` to preserve the full code-point range.
-
-```wit
-export initial: func(name: string) -> char;
-```
-
-```sql
-SELECT ex_initial('Ada');   -- 'A'
-```
+Mapped as a `text` domain with `char_length(VALUE) = 1`.
 
 ### 1.6 `string` and `list<u8>`
 
@@ -126,12 +115,9 @@ export upper: func(s: string) -> string;
 export hash:  func(bytes: list<u8>) -> list<u8>;
 ```
 
-- `string` → `text` (always UTF-8)
-- `list<u8>` → `bytea` (a typed byte list)
-
 ```sql
-SELECT ex_upper('hello');             -- 'HELLO'
-SELECT encode(ex_hash('\x00ff'), 'hex');
+SELECT ex__upper('hello');
+SELECT encode(ex__hash('\x00ff'), 'hex');
 ```
 
 ## 2. Composites
@@ -147,34 +133,34 @@ record point {
 export midpoint: func(a: point, b: point) -> point;
 ```
 
-```sql
--- CREATE TYPE ex_record_point AS (x double precision, y double precision);
--- CREATE FUNCTION ex_midpoint(a ex_record_point, b ex_record_point)
---   RETURNS ex_record_point ...;
+Composite type name example: `pgwasm.m42_point` (exact suffix depends on WIT name
+and module id).
 
-SELECT ex_midpoint(ROW(0, 0)::ex_record_point,
-                   ROW(2, 4)::ex_record_point);
---   (1,2)
+```sql
+SELECT ex__midpoint(ROW(0, 0)::pgwasm.m42_point,
+                    ROW(2, 4)::pgwasm.m42_point);
 ```
 
 ### 2.2 `tuple`
 
-Anonymous tuples get an auto-registered composite with a hashed name so
-reload stays deterministic:
+Tuples use composite fields `f0`, `f1`, …
 
 ```wit
 export split: func(s: string) -> tuple<string, string>;
 ```
 
 ```sql
--- CREATE TYPE pgwasm."m<module_id>_<type_key>" AS (f0 text, f1 text);
-SELECT * FROM ex_split('a=b');
---   field0 | field1
---   -------+-------
---   a      | b
+-- CREATE TYPE pgwasm.m42_tuple_... AS (f0 text, f1 text);
+SELECT * FROM ex__split('a=b');
+--  f0 | f1
+-- ----+----
+--  a  | b
 ```
 
 ### 2.3 `variant`
+
+Variants are stored as `(discriminant text, payload jsonb)` so PostgreSQL never
+needs nullable per-case columns.
 
 ```wit
 variant shape {
@@ -187,19 +173,10 @@ export area: func(s: shape) -> f64;
 ```
 
 ```sql
--- CREATE TYPE ex_variant_shape AS (
---   tag        text,
---   circle     double precision,
---   rectangle  pgwasm."m<module_id>_<type_key>",
---   unit       boolean DEFAULT false
--- );
-
-SELECT ex_area(ROW('circle', 3.0, NULL, false)::ex_variant_shape);
---   28.274...
+-- CREATE TYPE pgwasm.m42_shape AS (discriminant text, payload jsonb);
+-- Example row: discriminant 'circle', payload '3.0' (json number) for radius
+SELECT ex__area(ROW('circle', '3.0'::jsonb)::pgwasm.m42_shape);
 ```
-
-Recursive variants (e.g. a linked-list shape) fall back to tagged
-`jsonb` so PostgreSQL does not have to represent a cyclic composite.
 
 ### 2.4 `enum`
 
@@ -210,8 +187,8 @@ export name-of: func(c: color) -> string;
 ```
 
 ```sql
--- CREATE TYPE ex_enum_color AS ENUM ('red', 'green', 'blue');
-SELECT ex_name_of('green'::ex_enum_color);  -- 'green'
+-- CREATE TYPE pgwasm.m42_color AS ENUM ('red', 'green', 'blue');
+SELECT ex__name_of('green'::pgwasm.m42_color);
 ```
 
 ### 2.5 `flags`
@@ -223,46 +200,41 @@ export mask: func(p: permissions) -> permissions;
 ```
 
 ```sql
--- CREATE DOMAIN ex_flags_permissions AS integer CHECK (VALUE >= 0);
---   bit 0 = read, bit 1 = write, bit 2 = execute
-
--- read | execute = 0b101 = 5
-SELECT ex_mask(5::ex_flags_permissions);
+-- CREATE DOMAIN pgwasm.m42_flags_permissions AS integer CHECK (VALUE >= 0 AND VALUE <= 7);
+SELECT ex__mask(5::pgwasm.m42_flags_permissions);
 ```
 
 ## 3. Generics
 
 ### 3.1 `option<T>`
 
+The return type is the PostgreSQL mapping of `T`, nullable.
+
 ```wit
 export find: func(key: string) -> option<s64>;
 ```
 
-`option<T>` maps to a nullable column of the PG type for `T`:
-
 ```sql
--- CREATE FUNCTION ex_find(key text) RETURNS bigint ...;  -- nullable
-SELECT ex_find('missing') IS NULL AS is_none;
+-- RETURNS bigint (nullable)
+SELECT ex__find('missing') IS NULL AS is_none;
 ```
 
 ### 3.2 `result<T, E>`
+
+Composite with `ok` and `err` attributes.
 
 ```wit
 export parse-int: func(s: string) -> result<s64, string>;
 ```
 
 ```sql
--- CREATE TYPE ex_result_parse_int AS (ok bigint, err text);
-SELECT ex_parse_int('42');    -- (42,)
-SELECT ex_parse_int('oops');  -- (,"invalid digit")
+SELECT ex__parse_int('42');
+SELECT ex__parse_int('oops');
 ```
-
-When `E` is a complex variant the result is stored as tagged `jsonb`:
-`{"ok": ...}` or `{"err": ...}`.
 
 ### 3.3 `list<T>`
 
-Typed lists follow the scalar rules:
+Homogeneous lists become PostgreSQL arrays (via a `NOT NULL` array domain).
 
 ```wit
 export sum-i32: func(xs: list<s32>) -> s32;
@@ -270,68 +242,18 @@ export names:   func() -> list<string>;
 ```
 
 ```sql
--- sum-i32: integer[] -> integer
-SELECT ex_sum_i32(ARRAY[1, 2, 3]);   -- 6
-
--- names: text[]
-SELECT unnest(ex_names());
+SELECT ex__sum_i32(ARRAY[1, 2, 3]);
+SELECT unnest(ex__names());
 ```
-
-For element types that are themselves composites or deep variants,
-`pgwasm` falls back to a domain over `jsonb` (documented on the module's
-`pgwasm.wit_types` row).
 
 ## 4. Resources and handles
 
-```wit
-resource counter {
-    constructor(seed: s32);
-    increment: func() -> s32;
-    value: func() -> s32;
-}
+WIT `resource` types and handles map to `bigint` in SQL. Constructor / method exports
+use Wasm component naming (`Type#method`, etc.); the SQL identifier is still
+`<module>__<sanitized export path>` — inspect `pgwasm.pgwasm_functions()` after load
+for the exact `fn_oid` and argument lists.
 
-export make-counter: func(seed: s32) -> counter;
-```
+## 5. Escape hatch: `pgwasm:host/json`
 
-Handles are represented as opaque `bigint` identifiers. The distinction
-between owned and borrowed handles is enforced at marshal time so
-`borrow<counter>` parameters cannot outlive the call.
-
-```sql
--- CREATE FUNCTION ex_make_counter(seed integer) RETURNS bigint ...;
--- Resource methods become free functions keyed on the handle:
--- CREATE FUNCTION ex_counter_increment(h bigint) RETURNS integer ...;
--- CREATE FUNCTION ex_counter_value(h bigint) RETURNS integer ...;
-
-WITH c AS (SELECT ex_make_counter(10) AS h)
-SELECT ex_counter_increment(h), ex_counter_increment(h), ex_counter_value(h)
-FROM c;
---   11 | 12 | 12
-```
-
-Resource lifetimes follow WIT rules: the owning `bigint` is dropped when
-its row is discarded (typically at statement end), which drops the
-underlying resource in the component.
-
-## 5. Deterministic naming
-
-`pgwasm` derives PG names as `<module_prefix>_<kind>_<wit_name>` where
-`<module_prefix>` is the slugified module name (the `name` argument of
-`pgwasm.pgwasm_load`, or the slugified WIT world name when `name` is absent).
-This guarantees:
-
-- Two modules can register records with the same WIT name without
-  colliding in the PG catalog.
-- `pgwasm.pgwasm_reload` can detect and preserve OIDs when the WIT definition
-  is byte-for-byte identical.
-- Administrators can identify the owning module from any `pg_type` row
-  at a glance.
-
-See `pgwasm.pgwasm_wit_types()` for the live list of registered types.
-
-## 6. Escape hatch: `pgwasm:host/json`
-
-For shapes that do not map cleanly — heavily recursive variants, open
-sums, etc. — a component may import the `pgwasm:host/json` interface
-and exchange data as `jsonb`. This is what "record as JSON" meant in v1
-and remains available as an explicit opt-in.
+For shapes that are intentionally loose or not covered above, a component may import
+`pgwasm:host/json` and exchange `jsonb` values directly.
