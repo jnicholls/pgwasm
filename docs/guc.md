@@ -38,8 +38,8 @@ captures when a change becomes visible.
 
 | GUC | Type | Default | Scope | Hot / cold | Effect |
 |-----|------|---------|-------|------------|--------|
-| `pgwasm.allow_load_from_file` | `bool` | `off` | `SUSET` | Hot | Allows the `pgwasm.pgwasm_load(path text, ...)` overload to read module bytes from disk. When `off`, only the `bytea` overload is accepted. |
-| `pgwasm.module_path` | `string` | `''` | `SUSET` | Hot (load-time) | Base directory used to resolve relative paths passed to the `text` overload of `pgwasm.pgwasm_load`. |
+| `pgwasm.allow_load_from_file` | `bool` | `off` | `SUSET` | Hot | Allows `pgwasm.pgwasm_load(..., '{"path": "..."}', ...)` to read module bytes from disk. When `off`, only the `bytes` JSON field is accepted. |
+| `pgwasm.module_path` | `string` | `''` | `SUSET` | Hot (load-time) | Base directory used to resolve relative paths in the `path` field of the `bytes_or_path` JSON object. |
 | `pgwasm.allowed_path_prefixes` | `string` | `''` | `SUSET` | Hot (load-time) | Comma-separated list of canonical path prefixes a module file must live under. Empty means "no path load is accepted". |
 | `pgwasm.follow_symlinks` | `bool` | `off` | `SUSET` | Hot (load-time) | When `off`, canonical path resolution rejects symlink traversal for module file loads. |
 | `pgwasm.max_module_bytes` | `int` (bytes) | `33554432` (32 MiB) | `SUSET` | Hot (load-time) | Hard upper bound on the module byte length accepted by `pgwasm.pgwasm_load`. Range `1 .. i32::MAX`. |
@@ -79,16 +79,16 @@ or next backend respectively.
 | `pgwasm.max_memory_pages` | `int` | `1024` | `SUSET` | Hot (per-call) | Maximum linear memory pages per invocation `Store` (`1024` pages ≈ 64 MiB). Enforced via `wasmtime::StoreLimits`. |
 | `pgwasm.max_instances_total` | `int` | `0` | `SUSET` | Hot (per-call) | Process-wide live instance cap. `0` means unbounded. |
 | `pgwasm.instances_per_module` | `int` | `1` | `SUSET` | Hot (next pool miss) | Backend-local instance-pool size per module. |
-| `pgwasm.fuel_enabled` | `bool` | `off` | `SUSET` | Hot (per-call) | Enables deterministic fuel budgeting. Requires `Config::consume_fuel` on the shared engine, so flipping it on / off resets the per-backend engine on next use. |
+| `pgwasm.fuel_enabled` | `bool` | `off` | `SUSET` | Hot (per-call) | When on, the trampoline seeds each `Store` with a finite fuel budget (`fuel_per_invocation`) and records usage in `pgwasm.pgwasm_stats.fuel_used_total`. The shared engine is always constructed with Wasmtime fuel metering enabled so `SET`/`get_fuel` stay valid; toggling this GUC does **not** rebuild the engine. |
 | `pgwasm.fuel_per_invocation` | `int` | `100000000` | `SUSET` | Hot (per-call) | Fuel budget assigned to each invocation when fuel is enabled. Range `1 .. i32::MAX`. |
 | `pgwasm.invocation_deadline_ms` | `int` (ms) | `5000` | `SUSET` | Hot (per-call) | Per-invocation wall-clock cap enforced via epoch interruption. `0` disables the deadline. |
-| `pgwasm.epoch_tick_ms` | `int` (ms) | `10` | `SUSET` | Hot (next engine build) | Resolution of the epoch ticker thread that advances `wasmtime::Engine` epochs. Changes apply when the engine is rebuilt (for example, after `pgwasm.enabled` flips off and on). Range `1 .. i32::MAX`. |
+| `pgwasm.epoch_tick_ms` | `int` (ms) | `10` | `SUSET` | Cold (process) | Interval passed to the epoch ticker thread when `runtime::init` runs. The sleeper does **not** re-read this GUC afterward; use a new backend process to change tick granularity. Range `1 .. i32::MAX`. |
 
 ## Observability
 
 | GUC | Type | Default | Scope | Hot / cold | Effect |
 |-----|------|---------|-------|------------|--------|
-| `pgwasm.collect_metrics` | `bool` | `on` | `SUSET` | Hot (per-call) | Enables shared-memory counter increments for invocations, errors, total_ns, and peak pages. When `off`, `pgwasm.pgwasm_stats()` rows stop advancing for new samples. |
+| `pgwasm.collect_metrics` | `bool` | `on` | `SUSET` | (reserved) | Defined in `guc.rs` for future gating; the trampoline currently updates shared-memory counters unconditionally when slots exist. |
 | `pgwasm.log_level` | `enum` | `notice` | `SUSET` | Hot | Minimum level used by `pgwasm` lifecycle / runtime `RAISE` events. Accepted values: `error`, `warning`, `notice`, `info`, `log`, `debug1`..`debug5`. |
 
 ## Notes
@@ -105,3 +105,5 @@ or next backend respectively.
   the next instantiation; byte-level state (compiled artifacts, cached
   `ModuleHandle`s) is only rebuilt by `pgwasm.pgwasm_reload` or a generation
   bump.
+- **Epoch ticker interval** (`pgwasm.epoch_tick_ms`) is fixed for the lifetime
+  of a backend once the extension starts the ticker thread.
