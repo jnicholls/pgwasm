@@ -680,7 +680,7 @@ mod tests {
     fn insert_stub_module() -> i64 {
         let n = STUB_COUNTER.fetch_add(1, Ordering::Relaxed);
         let row = modules::insert(&modules::NewModule {
-            abi: "core".to_string(),
+            abi: "module".to_string(),
             artifact_path: "/dev/null".to_string(),
             digest: vec![0u8; 32],
             generation: 0,

@@ -150,26 +150,26 @@ fn reload_impl_for_module_row(
 
     let abi_override = match opts.abi {
         None | Some(OptionsAbi::Component) => AbiOverride::Auto,
-        Some(OptionsAbi::Core) => AbiOverride::ForceCore,
+        Some(OptionsAbi::Module) => AbiOverride::ForceModule,
     };
     let classified = abi::detect(&bytes, abi_override)?;
 
     let catalog_abi = module_row.abi.to_ascii_lowercase();
     let breaking_allowed = opts.breaking_changes_allowed;
     match (catalog_abi.as_str(), classified) {
-        ("component", Abi::Core) | ("core", Abi::Component) => {
+        ("component", Abi::Module) | ("module", Abi::Component) => {
             if !breaking_allowed {
                 return Err(BreakingChange::AbiSwitched {
                     from: catalog_abi.clone(),
                     to: match classified {
                         Abi::Component => "component".to_string(),
-                        Abi::Core => "core".to_string(),
+                        Abi::Module => "module".to_string(),
                     },
                 }
                 .into_error());
             }
             return Err(PgWasmError::InvalidConfiguration(
-                "reload cannot switch between core and component ABI; unload the module and load again"
+                "reload cannot switch between module and component ABI; unload the module and load again"
                     .to_string(),
             ));
         }
@@ -214,7 +214,7 @@ fn reload_impl_for_module_row(
             policy_json,
             limits_json,
         ),
-        Abi::Core => reload_core(
+        Abi::Module => reload_core(
             module_name,
             module_id,
             module_id_u64,
@@ -383,7 +383,7 @@ fn reload_core(
     let wasm_path = artifacts::module_wasm_path(module_id_u64)?;
     let next_generation = module_row.generation.saturating_add(1);
     let updated = modules::NewModule {
-        abi: "core".to_string(),
+        abi: "module".to_string(),
         artifact_path: wasm_path.display().to_string(),
         digest: wasm_sha256_bytes.to_vec(),
         generation: next_generation,
@@ -500,7 +500,7 @@ fn plan_reload_exports_core(
             }
             continue;
         };
-        let new_sig = json!({"abi": "core", "export": wasm_name});
+        let new_sig = json!({"abi": "module", "export": wasm_name});
         if signature::export_signatures_differ(&old_row.signature, &new_sig) && !breaking_allowed {
             return Err(BreakingChange::ExportSignatureChanged {
                 wasm_name: wasm_name.clone(),
@@ -683,7 +683,7 @@ fn apply_export_changes_core(
     }
 
     for (spec, wasm_name) in new_specs {
-        let signature = json!({"abi": "core", "export": wasm_name});
+        let signature = json!({"abi": "module", "export": wasm_name});
         if let Some(old_row) = old_by_wasm.get(wasm_name) {
             let shape_changed =
                 old_row.arg_types != spec.arg_types || old_row.ret_type != norm_ret(spec.ret_type);
@@ -891,10 +891,10 @@ fn parse_reload_options(options: Option<pgrx::Json>) -> Result<LoadOptions> {
                 let s = json_string(&v, "abi")?;
                 out.abi = Some(match s.as_str() {
                     "component" => OptionsAbi::Component,
-                    "core" => OptionsAbi::Core,
+                    "module" => OptionsAbi::Module,
                     other => {
                         return Err(PgWasmError::InvalidConfiguration(format!(
-                            "options.abi must be \"component\" or \"core\", got `{other}`"
+                            "options.abi must be \"component\" or \"module\", got `{other}`"
                         )));
                     }
                 });

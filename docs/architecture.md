@@ -23,8 +23,8 @@ SQL objects live in the extension schema (`pgwasm` by default, from
   options, results, tuples) are mapped to PostgreSQL types **automatically**,
   and user-defined WIT types are registered as PostgreSQL composite types
   (UDTs), domains, or enums as appropriate.
-- **Core modules supported as a degraded path.** Non-component core modules
-  still work, but only with the small set of primitive ABIs that can be
+- **Module encoding supported as a degraded path.** Non-component module-encoding
+  binaries still work, but only with the small set of primitive ABIs that can be
   inferred safely from the module's export signatures.
 - **Strong, layered sandbox.** WASI and host capabilities are off by default.
   Administrators enable them through GUCs at extension scope; module loaders
@@ -123,7 +123,7 @@ pgwasm/
     registry.rs                      # process-local fn_oid / module export cache
     config.rs                        # LoadOptions, PolicyOverrides, Limits
     policy.rs                        # resolve(GUCs, overrides) -> EffectivePolicy
-    abi.rs                           # Component vs core classifier (wasmparser)
+    abi.rs                           # Component vs module classifier (wasmparser)
     wit/
       mod.rs
       signature.rs                   # export signature JSON for catalog / reload checks
@@ -282,8 +282,8 @@ Steps (high level; SPI transaction with abort cleanup on failure):
 
 1. **AuthZ.** Superuser or member of `pgwasm_loader`; `pgwasm.enabled` must be on.
 2. **Read bytes** as above; enforce size limits.
-3. **Validate / classify.** `wasmparser` validation, then `abi::detect` (`Component` vs `Core`;
-   optional `options.abi` forces core parsing only).
+3. **Validate / classify.** `wasmparser` validation, then `abi::detect` (`Component` vs `Module`;
+   optional `options.abi` forces module parsing only).
 4. **WIT / types / exports.** Decode the world (`wit::world`), plan types (`wit::typing`),
    register UDTs (`wit::udt`), plan exports, and register `pg_proc` rows via `proc_reg`.
    SQL-visible function names are `'<module_name>' || '__' || <sanitized-export-key>` (see
@@ -543,6 +543,9 @@ flipping them — that is intentional.
   "replace_exports": false
 }
 ```
+
+`options.abi` may be `"component"` (default) or `"module"` to force module-encoding
+classification when loading non-component binaries.
 
 `pgwasm.pgwasm_reconfigure(module_name, policy, limits)` merges JSON objects into the
 catalog row's `policy` / `limits` columns (see `lifecycle/reconfigure.rs`); keys mirror
@@ -820,8 +823,8 @@ Fixtures:
   `strings.component.wasm`, `records.component.wasm`,
   `enums.component.wasm`, `variants.component.wasm`,
   `policy_probe.component.wasm`, `hooks.component.wasm`.
-- A small **core-module** corpus for the degraded path: `add_i32.wat`,
-  `echo_mem.wat`.
+- A small **module-encoding** corpus for the degraded path: `add_i32.wat`,
+  `echo_mem.wat` (fixtures under `pgwasm/tests/fixtures/core/`).
 
 ---
 
@@ -830,7 +833,7 @@ Fixtures:
 `pgwasm/Cargo.toml` currently defaults to `pg17` and keeps the component
 model always enabled. The earlier `component-model` / `core-only` feature split
 was closed without implementation; v2 remains Wasmtime-only with both component
-and degraded core paths compiled.
+and degraded module-encoding paths compiled.
 
 No `runtime-extism`, no `runtime-wasmer`: v2 is Wasmtime-only.
 

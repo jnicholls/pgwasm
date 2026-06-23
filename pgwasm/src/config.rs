@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub(crate) enum Abi {
     #[default]
     Component,
-    Core,
+    Module,
 }
 
 /// Per-module resource ceilings that can only tighten extension GUC limits.

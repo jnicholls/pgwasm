@@ -99,7 +99,7 @@ fn trampoline_inner(fcinfo: FunctionCallInfo) -> Result<Datum, TrampolineReport>
         wasmtime_version: DEFAULT_WASMTIME_VERSION,
     };
 
-    if module_row.abi.eq_ignore_ascii_case("core") {
+    if module_row.abi.eq_ignore_ascii_case("module") {
         invoke_core_export(
             fcinfo,
             &export_row,
