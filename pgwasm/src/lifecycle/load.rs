@@ -93,7 +93,7 @@ pub(crate) fn load_impl(
 
     let abi_override = match opts.abi {
         None | Some(OptionsAbi::Component) => AbiOverride::Auto,
-        Some(OptionsAbi::Core) => AbiOverride::ForceCore,
+        Some(OptionsAbi::Module) => AbiOverride::ForceModule,
     };
     let classified = abi::detect(&bytes, abi_override)?;
 
@@ -122,7 +122,7 @@ pub(crate) fn load_impl(
                 limits_json,
             )
         }),
-        Abi::Core => artifacts::with_artifact_fs_lock_result(|| {
+        Abi::Module => artifacts::with_artifact_fs_lock_result(|| {
             load_core_path(
                 module_name,
                 &bytes,
@@ -312,7 +312,7 @@ fn load_core_path(
     let _loaded = runtime_core::compile(wasm_engine, bytes)?;
 
     let placeholder = modules::NewModule {
-        abi: "core".to_string(),
+        abi: "module".to_string(),
         artifact_path: "pending".to_string(),
         digest: wasm_sha256_bytes.to_vec(),
         generation: 0,
@@ -352,7 +352,7 @@ fn load_core_path(
             } else {
                 Some(spec.ret_type)
             },
-            signature: json!({"abi": "core", "export": wasm_export}),
+            signature: json!({"abi": "module", "export": wasm_export}),
             sql_name: spec.name.clone(),
             wasm_name: wasm_export,
         });
@@ -360,7 +360,7 @@ fn load_core_path(
 
     let wasm_path = artifacts::module_wasm_path(module_id_u64)?;
     let updated = modules::NewModule {
-        abi: "core".to_string(),
+        abi: "module".to_string(),
         artifact_path: wasm_path.display().to_string(),
         digest: wasm_sha256_bytes.to_vec(),
         generation: 0,
@@ -491,10 +491,10 @@ fn parse_load_options(options: Option<pgrx::Json>) -> Result<LoadOptions> {
                 let s = json_string(&v, "abi")?;
                 out.abi = Some(match s.as_str() {
                     "component" => OptionsAbi::Component,
-                    "core" => OptionsAbi::Core,
+                    "module" => OptionsAbi::Module,
                     other => {
                         return Err(PgWasmError::InvalidConfiguration(format!(
-                            "options.abi must be \"component\" or \"core\", got `{other}`"
+                            "options.abi must be \"component\" or \"module\", got `{other}`"
                         )));
                     }
                 });

@@ -126,7 +126,7 @@ BEGIN
     PERFORM pgwasm.pgwasm_load(
         'errors_core_unsupported',
         json_build_object('bytes', '0061736d01000000'),
-        json_build_object('abi', 'core')
+        json_build_object('abi', 'module')
     );
     RAISE EXCEPTION 'expected core-only load to be unsupported in this configuration';
 EXCEPTION

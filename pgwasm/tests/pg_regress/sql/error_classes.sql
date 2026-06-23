@@ -1818,7 +1818,7 @@ BEGIN
     PERFORM pgwasm.pgwasm_load(
         'ec_core',
         json_build_object('bytes', '0061736d01000000'),
-        json_build_object('abi', 'core')
+        json_build_object('abi', 'module')
     );
     RAISE EXCEPTION 'expected unsupported';
 EXCEPTION

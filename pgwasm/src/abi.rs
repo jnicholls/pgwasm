@@ -7,13 +7,13 @@ use crate::errors::PgWasmError;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Abi {
     Component,
-    Core,
+    Module,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AbiOverride {
     Auto,
-    ForceCore,
+    ForceModule,
 }
 
 pub(crate) fn detect(bytes: &[u8], override_: AbiOverride) -> Result<Abi, PgWasmError> {
@@ -25,7 +25,7 @@ pub(crate) fn detect(bytes: &[u8], override_: AbiOverride) -> Result<Abi, PgWasm
                 let abi = if encoding == Encoding::Component {
                     Abi::Component
                 } else if encoding == Encoding::Module {
-                    Abi::Core
+                    Abi::Module
                 } else {
                     return Err(PgWasmError::ValidationFailed(format!(
                         "unsupported wasm encoding: {encoding:?}"
@@ -45,9 +45,9 @@ pub(crate) fn detect(bytes: &[u8], override_: AbiOverride) -> Result<Abi, PgWasm
 
     validate(bytes)?;
 
-    if detected == Abi::Component && override_ == AbiOverride::ForceCore {
+    if detected == Abi::Component && override_ == AbiOverride::ForceModule {
         return Err(PgWasmError::ValidationFailed(
-            "ABI override \"core\" cannot be used with a component binary".to_string(),
+            "ABI override \"module\" cannot be used with a component binary".to_string(),
         ));
     }
 
@@ -77,9 +77,9 @@ mod host_tests {
     ];
 
     #[test]
-    fn detects_core_module_header() {
+    fn detects_module_header() {
         let detected = detect(MINIMAL_CORE_MODULE, AbiOverride::Auto).unwrap();
-        assert_eq!(detected, Abi::Core);
+        assert_eq!(detected, Abi::Module);
     }
 
     #[test]
@@ -89,8 +89,8 @@ mod host_tests {
     }
 
     #[test]
-    fn force_core_rejects_component_binary() {
-        let result = detect(MINIMAL_COMPONENT, AbiOverride::ForceCore);
+    fn force_module_rejects_component_binary() {
+        let result = detect(MINIMAL_COMPONENT, AbiOverride::ForceModule);
         assert!(matches!(result, Err(PgWasmError::ValidationFailed(_))));
     }
 

@@ -1,6 +1,6 @@
 # Core module fixtures (`.wat`)
 
-These are **core** (non-component) WebAssembly modules used by `wasm._core_invoke_scalar` regress tests.
+These are **module-encoding** (non-component) WebAssembly binaries used by `wasm._core_invoke_scalar` regress tests. The directory name `core/` refers to the wasmtime execution path, not the ABI enum label (`Abi::Module`).
 
 | File        | Exports | Notes |
 |-------------|---------|--------|
