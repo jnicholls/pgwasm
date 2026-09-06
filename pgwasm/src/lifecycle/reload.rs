@@ -256,6 +256,7 @@ fn reload_component(
     let type_plan = typing::plan_types(module_name, &decoded)?;
 
     let old_exports = exports::list_by_module(module_id)?;
+    let old_slot_count = shmem::allocated_export_slots(module_id_u64);
 
     let wasm_engine = engine::try_shared_engine()?;
     let _compiled = component::compile(wasm_engine, bytes)?;
@@ -328,7 +329,13 @@ fn reload_component(
         Ok(())
     })?;
 
-    finish_reload_after_catalog_commit(module_id_u64, module_id, effective)?;
+    finish_reload_after_catalog_commit(
+        module_id_u64,
+        module_id,
+        effective,
+        old_slot_count,
+        new_specs.len(),
+    )?;
 
     Ok(true)
 }
@@ -357,6 +364,7 @@ fn reload_core(
         .collect();
 
     let old_exports = exports::list_by_module(module_id)?;
+    let old_slot_count = shmem::allocated_export_slots(module_id_u64);
     let old_by_wasm: HashMap<String, &exports::ExportRow> = old_exports
         .iter()
         .map(|row| (row.wasm_name.clone(), row))
@@ -403,7 +411,13 @@ fn reload_core(
         Ok(())
     })?;
 
-    finish_reload_after_catalog_commit(module_id_u64, module_id, effective)?;
+    finish_reload_after_catalog_commit(
+        module_id_u64,
+        module_id,
+        effective,
+        old_slot_count,
+        new_specs.len(),
+    )?;
 
     Ok(true)
 }
@@ -412,7 +426,11 @@ fn finish_reload_after_catalog_commit(
     module_id_u64: u64,
     module_id: i64,
     effective: &EffectivePolicy,
+    old_slot_count: Option<usize>,
+    new_slot_count: usize,
 ) -> Result<()> {
+    let _ = shmem::allocate_slots(module_id_u64, new_slot_count);
+    register_shmem_slot_rollback(module_id_u64, old_slot_count);
     pool::drain(module_id_u64)?;
 
     if exports::get_by_module_and_wasm_name(module_id, ON_RECONFIGURE_WASM_NAME)?.is_some() {
@@ -421,6 +439,25 @@ fn finish_reload_after_catalog_commit(
 
     shmem::bump_generation(module_id_u64);
     Ok(())
+}
+
+fn register_shmem_slot_rollback(module_id_u64: u64, old_slot_count: Option<usize>) {
+    let registered_sub_id = unsafe { pg_sys::GetCurrentSubTransactionId() };
+    pgrx::register_xact_callback(pgrx::PgXactCallbackEvent::Abort, move || {
+        restore_shmem_slots(module_id_u64, old_slot_count);
+    });
+    register_subxact_callback(PgSubXactCallbackEvent::AbortSub, move |my_subid, _| {
+        if my_subid == registered_sub_id {
+            restore_shmem_slots(module_id_u64, old_slot_count);
+        }
+    });
+}
+
+fn restore_shmem_slots(module_id_u64: u64, old_slot_count: Option<usize>) {
+    shmem::free_slots(module_id_u64);
+    if let Some(slot_count) = old_slot_count {
+        let _ = shmem::allocate_slots(module_id_u64, slot_count);
+    }
 }
 
 fn map_udt_error_to_breaking(err: PgWasmError, breaking_allowed: bool) -> PgWasmError {
@@ -1161,8 +1198,8 @@ fn reload_enforce_allowed_prefixes(canonical: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Catalog JSON can contain explicit `null` for optional serde fields; `reconfigure::limits_from_value`
-/// / `policy_overrides_from_value` expect absent keys or concrete scalars.
+/// Normalize optional catalog fields before merging; policy parsing expects absent keys or
+/// concrete scalars rather than explicit `null` values.
 fn json_without_null_entries(value: &Value) -> Result<Value> {
     let Some(obj) = value.as_object() else {
         return Ok(value.clone());

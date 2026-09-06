@@ -1,4 +1,6 @@
-use pgrx::prelude::*;
+use std::sync::OnceLock;
+
+use pgrx::{pg_sys, prelude::*};
 
 mod abi;
 mod artifacts;
@@ -20,19 +22,30 @@ mod wit;
 
 pg_module_magic!(name, version);
 
+static BACKEND_INIT: OnceLock<()> = OnceLock::new();
+
+pub(crate) fn ensure_backend_init() {
+    BACKEND_INIT.get_or_init(|| {
+        runtime::init();
+        catalog::init();
+    });
+}
+
 #[allow(non_snake_case)]
 #[pg_guard]
 pub extern "C-unwind" fn _PG_init() {
     guc::register_gucs();
     shmem::init();
-    runtime::init();
-    catalog::init();
+    if unsafe { !pg_sys::process_shared_preload_libraries_in_progress } {
+        ensure_backend_init();
+    }
 }
 
 mod sql_api {
     use pgrx::prelude::*;
 
     use crate::{
+        ensure_backend_init,
         errors::{ErrorContext, IntoReport},
         lifecycle::{load, reconfigure, reload, unload},
     };
@@ -43,6 +56,7 @@ mod sql_api {
         bytes_or_path: pgrx::Json,
         options: default!(Option<pgrx::Json>, NULL),
     ) -> bool {
+        ensure_backend_init();
         load::load_impl(module_name, bytes_or_path, options).or_report(ErrorContext::default())
     }
 
@@ -52,6 +66,7 @@ mod sql_api {
         policy: Option<pgrx::Json>,
         limits: Option<pgrx::Json>,
     ) -> bool {
+        ensure_backend_init();
         reconfigure::reconfigure_impl(module_name, policy, limits)
             .or_report(ErrorContext::default())
     }
@@ -62,16 +77,19 @@ mod sql_api {
         bytes_or_path: pgrx::Json,
         options: default!(Option<pgrx::Json>, NULL),
     ) -> bool {
+        ensure_backend_init();
         reload::reload_impl(module_name, bytes_or_path, options).or_report(ErrorContext::default())
     }
 
     #[pg_extern(name = "pgwasm_unload")]
     fn unload(module_name: &str, cascade: default!(bool, false)) -> bool {
+        ensure_backend_init();
         unload::unload_impl(module_name, cascade).or_report(ErrorContext::default())
     }
 
     #[pg_extern(name = "pgwasm_unload_all")]
     fn unload_all() -> i64 {
+        ensure_backend_init();
         unload::unload_all_impl()
             .map(|n| n as i64)
             .or_report(ErrorContext::default())
@@ -82,6 +100,7 @@ mod views_api {
     use pgrx::{JsonB, pg_sys::Oid, prelude::*};
 
     use crate::{
+        ensure_backend_init,
         errors::{ErrorContext, IntoReport},
         views,
     };
@@ -101,6 +120,7 @@ mod views_api {
             name!(shared, bool),
         ),
     > {
+        ensure_backend_init();
         views::modules_sql().or_report(ErrorContext::default())
     }
 
@@ -118,6 +138,7 @@ mod views_api {
             name!(last_seen_generation, i64),
         ),
     > {
+        ensure_backend_init();
         views::functions_sql().or_report(ErrorContext::default())
     }
 
@@ -133,6 +154,7 @@ mod views_api {
             name!(last_seen_generation, i64),
         ),
     > {
+        ensure_backend_init();
         views::wit_types_sql().or_report(ErrorContext::default())
     }
 
@@ -146,6 +168,7 @@ mod views_api {
             name!(limits_json, JsonB),
         ),
     > {
+        ensure_backend_init();
         views::policy_effective_sql().or_report(ErrorContext::default())
     }
 
@@ -163,6 +186,7 @@ mod views_api {
             name!(shared, bool),
         ),
     > {
+        ensure_backend_init();
         views::stats_sql().or_report(ErrorContext::default())
     }
 

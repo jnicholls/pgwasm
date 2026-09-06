@@ -37,7 +37,7 @@ static mut PREV_SHMEM_STARTUP_HOOK: pg_sys::shmem_startup_hook_type = None;
 /// Called once from `_PG_init`.
 pub(crate) fn init() {
     unsafe {
-        #[cfg(any(feature = "pg13", feature = "pg14"))]
+        #[cfg(feature = "pg14")]
         request_shmem_resources();
 
         #[cfg(any(feature = "pg15", feature = "pg16", feature = "pg17", feature = "pg18"))]
@@ -137,14 +137,12 @@ pub(crate) enum ExportCounterKind {
     Traps,
 }
 
-#[cfg(feature = "pg_test")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ShmemOverflow {
     ExportSlots,
     ModuleSlots,
 }
 
-#[cfg(feature = "pg_test")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SlotRefs {
     pub(crate) export_len: usize,
@@ -226,7 +224,6 @@ impl ModuleSlot {
     }
 }
 
-#[cfg(feature = "pg_test")]
 impl ModuleSlot {
     fn claim(&self, module_id: u64, export_start: usize, export_len: usize) {
         self.module_id.store(module_id, Ordering::Relaxed);
@@ -295,7 +292,6 @@ impl ExportSlot {
     }
 }
 
-#[cfg(feature = "pg_test")]
 impl ExportSlot {
     fn claim(&self, module_id: u64, export_index: usize) {
         self.module_id.store(module_id, Ordering::Relaxed);
@@ -381,7 +377,6 @@ pub(crate) fn read_export_counter(
 }
 
 /// Reserve one module slot and `n_exports` export slots under CatalogLock.
-#[cfg(feature = "pg_test")]
 pub(crate) fn allocate_slots(module_id: u64, n_exports: usize) -> Result<SlotRefs, ShmemOverflow> {
     with_catalog_lock_exclusive(|| {
         let Some(shared_state) = shared_state_ref() else {
@@ -399,11 +394,18 @@ pub(crate) fn allocate_slots(module_id: u64, n_exports: usize) -> Result<SlotRef
             let export_len = shared_state.module_slots[module_slot]
                 .export_len
                 .load(Ordering::Relaxed) as usize;
-            return Ok(SlotRefs {
-                module_slot,
-                export_start,
-                export_len,
-            });
+            if export_len == n_exports {
+                return Ok(SlotRefs {
+                    module_slot,
+                    export_start,
+                    export_len,
+                });
+            }
+
+            for slot in &shared_state.export_slots[export_start..export_start + export_len] {
+                slot.clear();
+            }
+            shared_state.module_slots[module_slot].clear();
         }
 
         let module_slot =
@@ -433,6 +435,19 @@ pub(crate) fn allocate_slots(module_id: u64, n_exports: usize) -> Result<SlotRef
             export_start,
             export_len: n_exports,
         })
+    })
+}
+
+/// Return the number of export slots currently reserved for `module_id`.
+pub(crate) fn allocated_export_slots(module_id: u64) -> Option<usize> {
+    with_catalog_lock_shared(|| {
+        let shared_state = shared_state_ref()?;
+        let module_slot = find_module_slot_index(shared_state, module_id)?;
+        Some(
+            shared_state.module_slots[module_slot]
+                .export_len
+                .load(Ordering::Relaxed) as usize,
+        )
     })
 }
 
@@ -533,7 +548,6 @@ fn find_module_slot_index(shared_state: &SharedState, module_id: u64) -> Option<
     })
 }
 
-#[cfg(feature = "pg_test")]
 fn find_free_module_slot_index(shared_state: &SharedState) -> Option<usize> {
     shared_state
         .module_slots
@@ -553,7 +567,6 @@ fn find_export_slot_index(
     })
 }
 
-#[cfg(any(test, feature = "pg_test"))]
 fn find_contiguous_free_range<F>(
     total_slots: usize,
     needed_slots: usize,

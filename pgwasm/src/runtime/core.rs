@@ -78,11 +78,11 @@ pub(crate) fn invoke_i32_n(
     store.epoch_deadline_trap();
     store.set_epoch_deadline(epoch_deadline_ticks(policy));
 
-    if let Some(fuel) = fuel_units(policy) {
-        store.set_fuel(fuel).map_err(|error| {
-            PgWasmError::Internal(format!("failed to configure fuel for core invoke: {error}"))
-        })?;
-    }
+    // The shared engine always meters fuel, including when the invocation budget is disabled.
+    let fuel = fuel_units(policy).unwrap_or(u64::MAX);
+    store.set_fuel(fuel).map_err(|error| {
+        PgWasmError::Internal(format!("failed to configure fuel for core invoke: {error}"))
+    })?;
 
     let instance = loaded
         .linker

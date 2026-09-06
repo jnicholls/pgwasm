@@ -42,7 +42,7 @@ capabilities are configured by the database administrator.
 ## Quick start
 
 ```sh
-# Build and install the extension into the pgrx-managed Postgres (v13 by default).
+# Build and install the extension into the pgrx-managed Postgres (v17 by default).
 cargo pgrx install --release
 
 # Start the pgrx-managed cluster if you are not running your own.
@@ -116,6 +116,11 @@ master toggle (`pgwasm.allow_wasi`) and the specific capability
 -- see the `policy` / `limits` keys in the `options` JSON accepted by
 `pgwasm.pgwasm_load` and `pgwasm.pgwasm_reconfigure`.
 
+With `pgwasm.fuel_enabled = off`, invocations have no per-call fuel budget.
+When enabled, `pgwasm.fuel_per_invocation` sets that budget. Omitted or `null`
+module limit fields inherit the corresponding GUC ceiling; explicit limits
+can narrow it.
+
 See [docs/guc.md](docs/guc.md) for every GUC, default, scope, and
 hot/cold reconfiguration semantics.
 
@@ -134,7 +139,7 @@ hot/cold reconfiguration semantics.
 ## Development
 
 This is a [pgrx](https://github.com/pgcentralfoundation/pgrx) extension
-pinned to pgrx `0.18` with Wasmtime `44`. The repository is a Cargo
+pinned to pgrx `0.19.2` with Wasmtime `44`. The repository is a Cargo
 workspace; the extension crate is `pgwasm/`.
 
 Useful commands (see [AGENTS.md](AGENTS.md) for the authoritative testing
