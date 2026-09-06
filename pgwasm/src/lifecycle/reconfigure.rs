@@ -179,7 +179,8 @@ pub(crate) fn limits_from_value(value: &Value) -> Result<Limits> {
     };
 
     let mut out = Limits::default();
-    for (key, field_value) in obj {
+    // Optional limits serialize as null when the module inherits its GUC ceiling.
+    for (key, field_value) in obj.iter().filter(|(_, value)| !value.is_null()) {
         match key.as_str() {
             "fuel_per_invocation" => {
                 out.fuel_per_invocation = Some(json_i32(field_value, "fuel_per_invocation")?);

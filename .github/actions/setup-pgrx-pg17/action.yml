@@ -1,7 +1,7 @@
 name: Setup PostgreSQL 17 and pgrx
 description: >-
   Install PostgreSQL 17 from PGDG (binaries + dev headers), prepare dirs for
-  pgrx extension install, install cargo-pgrx 0.18, and run pgrx init against
+  pgrx extension install, install cargo-pgrx 0.19.2, and run pgrx init against
   the system pg_config so PGRX_HOME exists for pgrx-pg-sys builds.
 
 runs:
@@ -42,7 +42,7 @@ runs:
 
     - name: Install cargo-pgrx
       shell: bash
-      run: cargo install cargo-pgrx --locked --version 0.18.0
+      run: cargo install cargo-pgrx --locked --version 0.19.2
 
     - name: pgrx init (PG17)
       shell: bash

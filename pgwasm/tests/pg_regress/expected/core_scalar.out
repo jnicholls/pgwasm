@@ -20,4 +20,8 @@ SELECT pgwasm.pgwasm_core_invoke_scalar(
     ARRAY[40, 2]::int[]
 ) AS add_result
 ORDER BY 1;
-ERROR:  resource limit exceeded: fuel exhausted
+ add_result 
+------------
+         42
+(1 row)
+

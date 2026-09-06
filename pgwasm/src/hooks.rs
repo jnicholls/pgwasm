@@ -353,7 +353,8 @@ fn limits_from_module_json(value: &Value) -> Result<crate::config::Limits> {
     };
 
     let mut out = Limits::default();
-    for (key, field_value) in obj {
+    // Optional limits serialize as null when the module inherits its GUC ceiling.
+    for (key, field_value) in obj.iter().filter(|(_, value)| !value.is_null()) {
         match key.as_str() {
             "fuel_per_invocation" => {
                 out.fuel_per_invocation = Some(json_i32(field_value, "fuel_per_invocation")?);
@@ -440,9 +441,35 @@ mod host_tests {
     use wit_parser::Resolve;
 
     use super::*;
-    use crate::policy::GucSnapshot;
+    use crate::{config::Limits, policy::GucSnapshot};
 
     static HOOK_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+    #[test]
+    fn catalog_limits_accept_serialized_defaults_and_partial_overrides() {
+        let defaults = serde_json::to_value(Limits::default()).unwrap();
+        let parsed = limits_from_module_json(&defaults).unwrap();
+        assert!(parsed.fuel_per_invocation.is_none());
+        assert!(parsed.instances_per_module.is_none());
+        assert!(parsed.invocation_deadline_ms.is_none());
+        assert!(parsed.max_memory_pages.is_none());
+
+        let partial = serde_json::json!({
+            "fuel_per_invocation": null,
+            "instances_per_module": null,
+            "invocation_deadline_ms": null,
+            "max_memory_pages": 512,
+        });
+        let parsed = limits_from_module_json(&partial).unwrap();
+        assert!(parsed.fuel_per_invocation.is_none());
+        assert_eq!(parsed.max_memory_pages, Some(512));
+        let error =
+            limits_from_module_json(&serde_json::json!({"max_memory_pages": "512"})).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "invalid configuration: `max_memory_pages` must be a JSON integer"
+        );
+    }
 
     fn lock_hook_tests() -> std::sync::MutexGuard<'static, ()> {
         match HOOK_TEST_LOCK

@@ -187,7 +187,6 @@ BEGIN
 END
 $$;
 SELECT pgwasm.pgwasm_unload('errors_mapping_fixture', false) AS unloaded;
-WARNING:  pgwasm: on-unload hook failed for module_id 3: policy resolve failed: invalid configuration: `fuel_per_invocation` must be a JSON integer; unload continues
  unloaded 
 ----------
  t

@@ -231,7 +231,7 @@ fn load_component_path(
 
     // Register after artifacts exist: nested SPI during earlier steps can abort subtransactions; a
     // scoped `AbortSub` hook must not run cleanup until the module directory is populated.
-    register_abort_artifact_cleanup(module_id_u64);
+    register_abort_load_cleanup(module_id_u64);
 
     let _registered_types = udt::register_type_plan(&type_plan, module_id_u64, extension_oid)?;
 
@@ -287,6 +287,10 @@ fn load_component_path(
         Ok(())
     })?;
 
+    // Reserve metrics slots only after export rows exist. Slot exhaustion is an explicitly
+    // supported degraded mode (`shared = false`), so it must not fail module loading.
+    let _ = shmem::allocate_slots(module_id_u64, export_rows.len());
+
     if let Some(config) = load_hook_config {
         hooks::on_load(module_id_u64, &config)?;
     }
@@ -336,7 +340,7 @@ fn load_core_path(
     let wasm_dir = artifacts::module_dir(module_id_u64)?;
     artifacts::write_checksum(&wasm_dir, wasm_sha256_bytes)?;
 
-    register_abort_artifact_cleanup(module_id_u64);
+    register_abort_load_cleanup(module_id_u64);
 
     let export_specs = plan_core_export_proc_specs(bytes)?;
     let mut export_rows: Vec<exports::NewExport> = Vec::new();
@@ -384,6 +388,7 @@ fn load_core_path(
         Ok(())
     })?;
 
+    let _ = shmem::allocate_slots(module_id_u64, export_rows.len());
     shmem::bump_generation(module_id_u64);
 
     Ok(true)
@@ -399,22 +404,28 @@ fn try_prewarm_component_pool_note(module_id_u64: u64) {
     );
 }
 
-/// Remove on-disk artifacts if the surrounding (sub)transaction aborts. Uses only filesystem I/O
-/// (no SPI) because PostgreSQL forbids SPI in transaction abort callbacks.
+/// Release shared-memory slots and remove on-disk artifacts if the surrounding
+/// (sub)transaction aborts. This uses no SPI because PostgreSQL forbids SPI in transaction
+/// abort callbacks.
 ///
 /// `AbortSub` runs for **every** subtransaction abort in this backend (including SPI/savepoint
 /// cleanups). Only act when the aborted subtransaction is the same one that was current when the
 /// load registered this hook; otherwise nested aborts would delete artifacts mid-load.
-fn register_abort_artifact_cleanup(module_id_u64: u64) {
+fn register_abort_load_cleanup(module_id_u64: u64) {
     let registered_sub_id = unsafe { pg_sys::GetCurrentSubTransactionId() };
     pgrx::register_xact_callback(pgrx::PgXactCallbackEvent::Abort, move || {
-        remove_module_artifact_dir_if_present(module_id_u64);
+        clean_up_aborted_load(module_id_u64);
     });
     register_subxact_callback(PgSubXactCallbackEvent::AbortSub, move |my_subid, _| {
         if my_subid == registered_sub_id {
-            remove_module_artifact_dir_if_present(module_id_u64);
+            clean_up_aborted_load(module_id_u64);
         }
     });
+}
+
+fn clean_up_aborted_load(module_id_u64: u64) {
+    shmem::free_slots(module_id_u64);
+    remove_module_artifact_dir_if_present(module_id_u64);
 }
 
 fn remove_module_artifact_dir_if_present(module_id_u64: u64) {

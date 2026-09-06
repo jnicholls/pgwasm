@@ -36,7 +36,6 @@ ORDER BY name;
 (1 row)
 
 SELECT pgwasm.pgwasm_unload('load_regress_fixture', false) AS unloaded;
-WARNING:  pgwasm: on-unload hook failed for module_id 4: policy resolve failed: invalid configuration: `fuel_per_invocation` must be a JSON integer; unload continues
  unloaded 
 ----------
  t

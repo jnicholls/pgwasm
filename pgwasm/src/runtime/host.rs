@@ -167,7 +167,7 @@ fn spi_entry_to_host_value(
     typoid: pg_sys::Oid,
 ) -> Result<query::Value, String> {
     unsafe {
-        if pg_sys::get_typtype(typoid) == pg_sys::TYPTYPE_PSEUDO as i8 {
+        if pg_sys::get_typtype(typoid) == pg_sys::TYPTYPE_PSEUDO as libc::c_char {
             return spi_unknown_type_via_text(entry);
         }
     }

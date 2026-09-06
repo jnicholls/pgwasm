@@ -159,6 +159,8 @@ pub(crate) fn register(
             &extension_object,
             pg_sys::DependencyType::DEPENDENCY_EXTENSION,
         );
+        // An immediate unregister must see the extension dependency written above.
+        pg_sys::CommandCounterIncrement();
     }
 
     Ok(procedure_address.objectId)
@@ -171,14 +173,27 @@ pub(crate) fn unregister(fn_oid: pg_sys::Oid) -> Result<(), PgWasmError> {
         ));
     }
 
+    let procedure = pg_sys::ObjectAddress {
+        classId: pg_sys::ProcedureRelationId,
+        objectId: fn_oid,
+        objectSubId: 0,
+    };
     unsafe {
-        // SAFETY: caller provides a function OID within an active backend transaction context.
-        pg_sys::RemoveFunctionById(fn_oid);
+        // SAFETY: caller provides a live function OID within an active backend transaction.
+        // Use PostgreSQL's dependency-aware deletion path so outgoing pg_depend rows, shared
+        // dependencies, comments, labels, and initial privileges are removed with pg_proc.
+        // Dynamic exports are extension members, so skip the extension ownership edge while
+        // retaining DROP RESTRICT checks for ordinary dependents such as views.
+        pg_sys::performDeletion(
+            &procedure,
+            pg_sys::DropBehavior::DROP_RESTRICT,
+            pg_sys::PERFORM_DELETION_SKIP_EXTENSIONS as i32,
+        );
     }
     Ok(())
 }
 
-#[cfg(feature = "pg13")]
+#[cfg(any(feature = "pg14", feature = "pg15", feature = "pg16", feature = "pg17"))]
 #[allow(clippy::too_many_arguments)]
 unsafe fn procedure_create(
     spec: &ProcSpec,
@@ -205,6 +220,7 @@ unsafe fn procedure_create(
             pg_sys::Oid::from(pg_sys::F_FMGR_C_VALIDATOR),
             TRAMPOLINE_SYMBOL.as_pg_cstr(),
             EXTENSION_LIBRARY_PATH.as_pg_cstr(),
+            std::ptr::null_mut(),
             pg_sys::PROKIND_FUNCTION as c_char,
             false,
             false,
@@ -225,13 +241,7 @@ unsafe fn procedure_create(
     }
 }
 
-#[cfg(any(
-    feature = "pg14",
-    feature = "pg15",
-    feature = "pg16",
-    feature = "pg17",
-    feature = "pg18"
-))]
+#[cfg(feature = "pg18")]
 #[allow(clippy::too_many_arguments)]
 unsafe fn procedure_create(
     spec: &ProcSpec,
@@ -271,6 +281,7 @@ unsafe fn procedure_create(
             arg_names,
             std::ptr::null_mut(),
             Datum::null(),
+            std::ptr::null_mut(),
             Datum::null(),
             pg_sys::InvalidOid,
             procost,
@@ -396,7 +407,7 @@ fn build_arg_modes(spec: &ProcSpec) -> Result<Datum, PgWasmError> {
         .arg_modes
         .iter()
         .copied()
-        .map(|mode| Datum::from(mode.to_pg_char() as u8))
+        .map(|mode| Datum::from(mode.to_pg_char()))
         .collect();
 
     unsafe { construct_array_datum(&mut datums, pg_sys::CHAROID) }
@@ -624,18 +635,26 @@ mod tests {
     }
 
     #[pg_test]
-    fn unregister_removes_pg_proc_row() {
+    fn unregister_removes_pg_proc_row_and_dependencies() {
         let spec = base_spec(unique_name("proc_reg_unregister"));
         let fn_oid = register(&spec, extension_oid(), false).expect("register should succeed");
 
         unregister(fn_oid).expect("unregister should succeed");
 
-        let count = Spi::get_one::<i64>(&format!(
+        let proc_count = Spi::get_one::<i64>(&format!(
             "SELECT count(*) FROM pg_proc WHERE oid = {}",
             u32::from(fn_oid)
         ))
         .expect("count query should run");
-        assert_eq!(Some(0), count);
+        assert_eq!(Some(0), proc_count);
+
+        let dependency_count = Spi::get_one::<i64>(&format!(
+            "SELECT count(*) FROM pg_depend \
+             WHERE classid = 'pg_proc'::regclass AND objid = {}",
+            u32::from(fn_oid)
+        ))
+        .expect("dependency count query should run");
+        assert_eq!(Some(0), dependency_count);
     }
 
     #[pg_test]
