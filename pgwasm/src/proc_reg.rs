@@ -178,60 +178,6 @@ pub(crate) fn unregister(fn_oid: pg_sys::Oid) -> Result<(), PgWasmError> {
     Ok(())
 }
 
-#[cfg(feature = "pg13")]
-#[allow(clippy::too_many_arguments)]
-unsafe fn procedure_create(
-    spec: &ProcSpec,
-    schema_oid: pg_sys::Oid,
-    replace_exports: bool,
-    c_language_oid: pg_sys::Oid,
-    arg_type_vector: *mut pg_sys::oidvector,
-    all_arg_types: Datum,
-    arg_modes: Datum,
-    arg_names: Datum,
-    procost: f32,
-    prorows: f32,
-) -> pg_sys::ObjectAddress {
-    unsafe {
-        // SAFETY: caller validates arguments and pointer lifetimes for ProcedureCreate.
-        pg_sys::ProcedureCreate(
-            spec.name.as_pg_cstr(),
-            schema_oid,
-            replace_exports,
-            spec.returns_set,
-            spec.ret_type,
-            pg_sys::GetUserId(),
-            c_language_oid,
-            pg_sys::Oid::from(pg_sys::F_FMGR_C_VALIDATOR),
-            TRAMPOLINE_SYMBOL.as_pg_cstr(),
-            EXTENSION_LIBRARY_PATH.as_pg_cstr(),
-            pg_sys::PROKIND_FUNCTION as c_char,
-            false,
-            false,
-            spec.strict,
-            spec.volatility.to_pg_char(),
-            spec.parallel.to_pg_char(),
-            arg_type_vector,
-            all_arg_types,
-            arg_modes,
-            arg_names,
-            std::ptr::null_mut(),
-            Datum::null(),
-            Datum::null(),
-            pg_sys::InvalidOid,
-            procost,
-            prorows,
-        )
-    }
-}
-
-#[cfg(any(
-    feature = "pg14",
-    feature = "pg15",
-    feature = "pg16",
-    feature = "pg17",
-    feature = "pg18"
-))]
 #[allow(clippy::too_many_arguments)]
 unsafe fn procedure_create(
     spec: &ProcSpec,
@@ -271,6 +217,8 @@ unsafe fn procedure_create(
             arg_names,
             std::ptr::null_mut(),
             Datum::null(),
+            #[cfg(any(feature = "pg18", feature = "pg19"))]
+            std::ptr::null_mut(), // trfoids
             Datum::null(),
             pg_sys::InvalidOid,
             procost,

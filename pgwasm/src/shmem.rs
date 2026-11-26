@@ -29,7 +29,6 @@ static SHARED_STATE: AtomicPtr<SharedState> = AtomicPtr::new(std::ptr::null_mut(
 #[cfg(any(test, feature = "pg_test"))]
 static TEST_FALLBACK_STATE: OnceLock<&'static SharedState> = OnceLock::new();
 
-#[cfg(any(feature = "pg15", feature = "pg16", feature = "pg17", feature = "pg18"))]
 static mut PREV_SHMEM_REQUEST_HOOK: pg_sys::shmem_request_hook_type = None;
 
 static mut PREV_SHMEM_STARTUP_HOOK: pg_sys::shmem_startup_hook_type = None;
@@ -37,21 +36,14 @@ static mut PREV_SHMEM_STARTUP_HOOK: pg_sys::shmem_startup_hook_type = None;
 /// Called once from `_PG_init`.
 pub(crate) fn init() {
     unsafe {
-        #[cfg(any(feature = "pg13", feature = "pg14"))]
-        request_shmem_resources();
-
-        #[cfg(any(feature = "pg15", feature = "pg16", feature = "pg17", feature = "pg18"))]
-        {
-            PREV_SHMEM_REQUEST_HOOK = pg_sys::shmem_request_hook;
-            pg_sys::shmem_request_hook = Some(on_shmem_request_hook);
-        }
+        PREV_SHMEM_REQUEST_HOOK = pg_sys::shmem_request_hook;
+        pg_sys::shmem_request_hook = Some(on_shmem_request_hook);
 
         PREV_SHMEM_STARTUP_HOOK = pg_sys::shmem_startup_hook;
         pg_sys::shmem_startup_hook = Some(on_shmem_startup_hook);
     }
 }
 
-#[cfg(any(feature = "pg15", feature = "pg16", feature = "pg17", feature = "pg18"))]
 #[pg_guard]
 unsafe extern "C-unwind" fn on_shmem_request_hook() {
     unsafe {
@@ -108,8 +100,11 @@ unsafe fn initialize_shared_state() {
         );
 
         let catalog_lock = &raw mut (*lock_padded).lock;
-        let tranche_id = (*catalog_lock).tranche as i32;
-        pg_sys::LWLockRegisterTranche(tranche_id, CATALOG_LOCK_TRANCHE_NAME.as_ptr());
+        #[cfg(not(feature = "pg19"))]
+        {
+            let tranche_id = (*catalog_lock).tranche as i32;
+            pg_sys::LWLockRegisterTranche(tranche_id, CATALOG_LOCK_TRANCHE_NAME.as_ptr());
+        }
 
         if !found {
             shmem_ptr.write(SharedState::new(catalog_lock));
