@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use pgrx::{
     FromDatum,
-    fcinfo::{pg_arg_is_null, pg_get_nullable_datum, pg_getarg_type},
+    fcinfo::{pg_get_nullable_datum, pg_getarg_type},
     pg_guard,
     pg_sys::{self, Datum, FunctionCallInfo, Oid, Pg_finfo_record},
 };
@@ -417,7 +417,8 @@ fn invoke_core_export(
     let nargs = export_row.arg_types.len();
     let mut vals = Vec::with_capacity(nargs);
     for i in 0..nargs {
-        if unsafe { pg_arg_is_null(fcinfo, i) } {
+        let nd = unsafe { pg_get_nullable_datum(fcinfo, i) };
+        if nd.isnull {
             return Err(PgWasmError::ValidationFailed(format!(
                 "argument {i} is NULL; core scalar path expects non-null i32"
             )));
@@ -429,7 +430,6 @@ fn invoke_core_export(
                 u32::from(oid)
             )));
         }
-        let nd = unsafe { pg_get_nullable_datum(fcinfo, i) };
         let v =
             wasmtime::Val::I32(unsafe { i32::from_datum(nd.value, false) }.ok_or_else(|| {
                 PgWasmError::Internal(format!("failed to read int4 argument {i}"))

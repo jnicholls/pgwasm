@@ -28,7 +28,7 @@ If a prior run left that database in a bad state, drop it manually from the main
 psql "$DATABASE_URL" -c "DROP DATABASE IF EXISTS pgwasm_itest WITH (FORCE);"
 ```
 
-With pgrx-managed Postgres, the client port is **`28800 + PostgreSQL major version`** (for example **28813** for PG13, **28817** for PG17).
+With pgrx-managed Postgres, the client port is **`28800 + PostgreSQL major version`** (for example **28819** for PG19, **28817** for PG17).
 
 ```bash
 # From workspace root: install the extension for your pgrx PG version (include pg_test if you

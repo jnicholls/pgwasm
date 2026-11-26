@@ -40,6 +40,13 @@ jobs:
       - name: cargo test
         run: cargo test --workspace
 
+      - name: Check the extension against PostgreSQL 19
+        env:
+          PGRX_PG_CONFIG_PATH: /usr/lib/postgresql/19/bin/pg_config
+        run: |
+          sudo apt-get install -y --no-install-recommends postgresql-server-dev-19
+          cargo check --locked -p pgwasm --no-default-features --features pg19
+
       - name: cargo pgrx test
         run: cargo pgrx test pg17 -p pgwasm
 

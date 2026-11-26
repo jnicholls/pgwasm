@@ -42,7 +42,7 @@ capabilities are configured by the database administrator.
 ## Quick start
 
 ```sh
-# Build and install the extension into the pgrx-managed Postgres (v13 by default).
+# Build and install the extension into the pgrx-managed Postgres (v17 by default).
 cargo pgrx install --release
 
 # Start the pgrx-managed cluster if you are not running your own.
@@ -134,8 +134,8 @@ hot/cold reconfiguration semantics.
 ## Development
 
 This is a [pgrx](https://github.com/pgcentralfoundation/pgrx) extension
-pinned to pgrx `0.18` with Wasmtime `44`. The repository is a Cargo
-workspace; the extension crate is `pgwasm/`.
+for PostgreSQL 15–19, built with pgrx `0.20.1` and Wasmtime `44`.
+The extension crate is `pgwasm/` in this Cargo workspace.
 
 Useful commands (see [AGENTS.md](AGENTS.md) for the authoritative testing
 guide):
